@@ -138,6 +138,7 @@ class CoreAttentionAnalyzer:
         """提取核心特征"""
         # 编码输入
         inputs = tokenizer(text, return_tensors="pt", max_length=200, truncation=True)
+        inputs = {k: v.to(model.device) for k, v in inputs.items()}
 
         # 获取注意力
         with torch.no_grad():
