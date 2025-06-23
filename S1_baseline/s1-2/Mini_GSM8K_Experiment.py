@@ -31,7 +31,7 @@ else:
 class FixedGSM8KProcessor:
     """修复版GSM8K数据处理器"""
 
-    def __init__(self, data_path="gsm8k_data/train.jsonl", max_samples=100):
+    def __init__(self, data_path="gsm8k_data/train.jsonl", max_samples=500):
         print(f"📚 Loading GSM8K dataset...")
         self.data_path = data_path
         self.max_samples = max_samples
@@ -322,7 +322,7 @@ class RobustAttentionAnalyzer:
 class FixedExperiment:
     """修复版实验类"""
 
-    def __init__(self, model_name="microsoft/DialoGPT-small", data_path="gsm8k_data/train.jsonl"):
+    def __init__(self, model_name="TinyLlama/TinyLlama-1.1B-Chat-v1.0", data_path="gsm8k_data/train.jsonl"):
         print(f"🚀 Initializing Fixed GSM8K Experiment")
         print(f"📊 Model: {model_name}")
 
@@ -576,7 +576,7 @@ def run_fixed_gsm8k_experiment():
     try:
         # 运行实验
         experiment = FixedExperiment()
-        results = experiment.run_experiment(n_per_class=8)
+        results = experiment.run_experiment(n_per_class=50)
 
         if len(results) > 0:
             print(f"\n🎉 Experiment completed successfully!")
