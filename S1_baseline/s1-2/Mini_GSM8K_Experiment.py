@@ -26,48 +26,50 @@ class MinimalGSM8KProcessor:
     def __init__(self):
         print("📚 Loading GSM8K dataset...")
         try:
-            # 只加载训练集，取前100个样本快速测试
-            dataset = load_dataset("openai/gsm8k", "main", split="train[:100]")
-            self.samples = list(dataset)
+            # 修复数据集加载方式
+            dataset = load_dataset("openai/gsm8k", "main")
+            # 取训练集的前100个样本
+            train_data = dataset['train']
+            self.samples = [train_data[i] for i in range(min(100, len(train_data)))]
             print(f"✅ Loaded {len(self.samples)} GSM8K samples")
         except Exception as e:
             print(f"⚠️ GSM8K loading failed: {e}")
-    #         print("🔄 Using minimal fallback...")
-    #         self.samples = self._create_minimal_fallback()
-    #
-    # def _create_minimal_fallback(self):
-    #     """最小备用数据集"""
-    #     return [
-    #         # Simple (1-2 steps)
-    #         {'question': "Tom has 5 apples. He eats 2. How many are left?",
-    #          'answer': "Tom has 5 apples.\nHe eats 2.\n5 - 2 = 3.\n#### 3"},
-    #         {'question': "Sarah buys 4 books for $3 each. How much does she spend?",
-    #          'answer': "4 books at $3 each.\nTotal = 4 × 3 = $12.\n#### 12"},
-    #         {'question': "A box has 15 pencils. 6 are removed. How many remain?",
-    #          'answer': "15 pencils initially.\n6 removed.\n15 - 6 = 9.\n#### 9"},
-    #         {'question': "Lisa walks 2 miles each day. How far in 5 days?",
-    #          'answer': "2 miles per day.\n5 days total.\n2 × 5 = 10 miles.\n#### 10"},
-    #
-    #         # Medium (3-4 steps)
-    #         {'question': "John earns $12/hour for 8 hours, then spends $30. Money left?",
-    #          'answer': "$12 per hour.\n8 hours worked.\nEarned = 12 × 8 = $96.\nSpent $30.\nLeft = 96 - 30 = $66.\n#### 66"},
-    #         {'question': "A school has 240 students. 1/3 are girls. How many boys?",
-    #          'answer': "240 students total.\n1/3 are girls.\nGirls = 240 ÷ 3 = 80.\nBoys = 240 - 80 = 160.\n#### 160"},
-    #         {'question': "Rectangle: 12m long, 8m wide. What's the area and perimeter?",
-    #          'answer': "Length = 12m, Width = 8m.\nArea = 12 × 8 = 96 m².\nPerimeter = 2(12 + 8) = 40m.\n#### 96"},
-    #         {'question': "Store sells 25 items at $4 each, costs $60 total. Profit?",
-    #          'answer': "25 items at $4 each.\nRevenue = 25 × 4 = $100.\nCosts = $60.\nProfit = 100 - 60 = $40.\n#### 40"},
-    #
-    #         # Complex (5+ steps)
-    #         {'question': "Investment: $1000 at 8% for 2 years compound. Final amount?",
-    #          'answer': "Principal = $1000.\nRate = 8% = 0.08.\nTime = 2 years.\nYear 1: 1000 × 1.08 = $1080.\nYear 2: 1080 × 1.08 = $1166.40.\n#### 1166.40"},
-    #         {'question': "Two cars 180 miles apart drive toward each other at 45mph and 60mph. Meeting time?",
-    #          'answer': "Distance = 180 miles.\nCar A: 45 mph.\nCar B: 60 mph.\nCombined speed = 45 + 60 = 105 mph.\nTime = 180 ÷ 105 = 1.71 hours.\n#### 1.71"},
-    #         {'question': "Company profit $80k, up 25% Q1, down 15% Q2. Final profit?",
-    #          'answer': "Initial = $80,000.\nQ1: up 25%.\nQ1 profit = 80000 × 1.25 = $100,000.\nQ2: down 15%.\nQ2 profit = 100000 × 0.85 = $85,000.\n#### 85000"},
-    #         {'question': "Pool 15ft×10ft×4ft. Gallons if 1 cubic foot = 7.5 gallons?",
-    #          'answer': "Dimensions: 15ft × 10ft × 4ft.\nVolume = 15 × 10 × 4 = 600 cubic feet.\nGallons = 600 × 7.5 = 4500 gallons.\n#### 4500"}
-    #     ]
+            print("🔄 Using minimal fallback...")
+            self.samples = self._create_minimal_fallback()
+
+    def _create_minimal_fallback(self):
+        """最小备用数据集"""
+        return [
+            # Simple (1-2 steps)
+            {'question': "Tom has 5 apples. He eats 2. How many are left?",
+             'answer': "Tom has 5 apples.\nHe eats 2.\n5 - 2 = 3.\n#### 3"},
+            {'question': "Sarah buys 4 books for $3 each. How much does she spend?",
+             'answer': "4 books at $3 each.\nTotal = 4 × 3 = $12.\n#### 12"},
+            {'question': "A box has 15 pencils. 6 are removed. How many remain?",
+             'answer': "15 pencils initially.\n6 removed.\n15 - 6 = 9.\n#### 9"},
+            {'question': "Lisa walks 2 miles each day. How far in 5 days?",
+             'answer': "2 miles per day.\n5 days total.\n2 × 5 = 10 miles.\n#### 10"},
+
+            # Medium (3-4 steps)
+            {'question': "John earns $12/hour for 8 hours, then spends $30. Money left?",
+             'answer': "$12 per hour.\n8 hours worked.\nEarned = 12 × 8 = $96.\nSpent $30.\nLeft = 96 - 30 = $66.\n#### 66"},
+            {'question': "A school has 240 students. 1/3 are girls. How many boys?",
+             'answer': "240 students total.\n1/3 are girls.\nGirls = 240 ÷ 3 = 80.\nBoys = 240 - 80 = 160.\n#### 160"},
+            {'question': "Rectangle: 12m long, 8m wide. What's the area and perimeter?",
+             'answer': "Length = 12m, Width = 8m.\nArea = 12 × 8 = 96 m².\nPerimeter = 2(12 + 8) = 40m.\n#### 96"},
+            {'question': "Store sells 25 items at $4 each, costs $60 total. Profit?",
+             'answer': "25 items at $4 each.\nRevenue = 25 × 4 = $100.\nCosts = $60.\nProfit = 100 - 60 = $40.\n#### 40"},
+
+            # Complex (5+ steps)
+            {'question': "Investment: $1000 at 8% for 2 years compound. Final amount?",
+             'answer': "Principal = $1000.\nRate = 8% = 0.08.\nTime = 2 years.\nYear 1: 1000 × 1.08 = $1080.\nYear 2: 1080 × 1.08 = $1166.40.\n#### 1166.40"},
+            {'question': "Two cars 180 miles apart drive toward each other at 45mph and 60mph. Meeting time?",
+             'answer': "Distance = 180 miles.\nCar A: 45 mph.\nCar B: 60 mph.\nCombined speed = 45 + 60 = 105 mph.\nTime = 180 ÷ 105 = 1.71 hours.\n#### 1.71"},
+            {'question': "Company profit $80k, up 25% Q1, down 15% Q2. Final profit?",
+             'answer': "Initial = $80,000.\nQ1: up 25%.\nQ1 profit = 80000 × 1.25 = $100,000.\nQ2: down 15%.\nQ2 profit = 100000 × 0.85 = $85,000.\n#### 85000"},
+            {'question': "Pool 15ft×10ft×4ft. Gallons if 1 cubic foot = 7.5 gallons?",
+             'answer': "Dimensions: 15ft × 10ft × 4ft.\nVolume = 15 × 10 × 4 = 600 cubic feet.\nGallons = 600 × 7.5 = 4500 gallons.\n#### 4500"}
+        ]
 
     def count_solution_steps(self, answer: str) -> int:
         """计算解题步骤数 - 客观方法"""
@@ -241,7 +243,8 @@ class MinimalExperiment:
             self.model = AutoModelForCausalLM.from_pretrained(
                 model_name,
                 output_attentions=True,
-                torch_dtype=torch.float32  # 确保兼容性
+                torch_dtype=torch.float32,  # 确保兼容性
+                device_map="auto" if torch.cuda.is_available() else None
             )
             if self.tokenizer.pad_token is None:
                 self.tokenizer.pad_token = self.tokenizer.eos_token
@@ -261,8 +264,15 @@ class MinimalExperiment:
         print(f"🎯 Threshold: {self.analyzer.threshold}")
 
         # 准备数据
-        data = self.processor.get_balanced_dataset(n_per_class)
-        print(f"📋 Total samples: {len(data)}")
+        try:
+            data = self.processor.get_balanced_dataset(n_per_class)
+            print(f"📋 Total samples: {len(data)}")
+        except Exception as e:
+            print(f"❌ Data preparation failed: {e}")
+            print("🔄 Using fallback data...")
+            # 如果数据准备失败，使用fallback数据
+            self.processor.samples = self.processor._create_minimal_fallback()
+            data = self.processor.get_balanced_dataset(n_per_class)
 
         # 运行实验
         results = []
@@ -298,6 +308,10 @@ class MinimalExperiment:
             except Exception as e:
                 print(f"  ❌ Error processing sample: {e}")
                 continue
+
+        if not results:
+            print("❌ No results generated. Check data and model setup.")
+            return pd.DataFrame()
 
         # 分析结果
         results_df = pd.DataFrame(results)
