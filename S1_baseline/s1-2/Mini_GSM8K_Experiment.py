@@ -31,7 +31,7 @@ else:
 class FixedGSM8KProcessor:
     """修复版GSM8K数据处理器"""
 
-    def __init__(self, data_path="gsm8k_data/train.jsonl", max_samples=500):
+    def __init__(self, data_path="gsm8k_data/train.jsonl", max_samples=1000):
         print(f"📚 Loading GSM8K dataset...")
         self.data_path = data_path
         self.max_samples = max_samples
@@ -576,7 +576,7 @@ def run_fixed_gsm8k_experiment():
     try:
         # 运行实验
         experiment = FixedExperiment()
-        results = experiment.run_experiment(n_per_class=50)
+        results = experiment.run_experiment(n_per_class=100)
 
         if len(results) > 0:
             print(f"\n🎉 Experiment completed successfully!")
