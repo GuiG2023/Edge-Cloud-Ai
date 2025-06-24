@@ -512,10 +512,25 @@ class FixedExperiment:
 
         # 4. 相关性分析
         if len(available_difficulties) >= 2:
-            # 创建数值映射
+            # 创建数值映射 - 按照难度顺序而不是字母序
+            # 定义正确的难度顺序
+            difficulty_order = ['simple', 'medium', 'complex']
+
+            # 只保留实际存在的难度级别，并按正确顺序排列
+            existing_difficulties = [d for d in difficulty_order if d in available_difficulties]
+
+            # 如果有其他未预期的难度级别，添加到末尾
+            other_difficulties = [d for d in available_difficulties if d not in difficulty_order]
+            final_order = existing_difficulties + sorted(other_difficulties)
+
+             # 创建映射：简单=1, 中等=2, 复杂=3
             diff_mapping = {}
-            for i, diff in enumerate(sorted(available_difficulties)):
+            for i, diff in enumerate(final_order):
                 diff_mapping[diff] = i + 1
+
+            print(f"\n🔗 Difficulty Mapping:")
+            for diff, num in diff_mapping.items():
+                print(f"  {diff} → {num}")
 
             df['diff_numeric'] = df['true_difficulty'].map(diff_mapping)
             correlation = df['complexity_score'].corr(df['diff_numeric'])
@@ -524,14 +539,34 @@ class FixedExperiment:
             print(f"Correlation: {correlation:.4f}")
             print(f"R²: {correlation ** 2:.3f} ({correlation ** 2 * 100:.1f}%)")
 
-            if correlation > 0.7:
-                print("✅ Very strong correlation")
-            elif correlation > 0.5:
-                print("✅ Strong correlation")
-            elif correlation > 0.3:
-                print("⚠️ Moderate correlation")
+            # 使用绝对值来判断相关性强度，但也显示方向
+            abs_correlation = abs(correlation)
+
+            if abs_correlation > 0.7:
+                strength = "✅ Very strong correlation"
+            elif abs_correlation > 0.5:
+                strength = "✅ Strong correlation"
+            elif abs_correlation > 0.3:
+                strength = "⚠️ Moderate correlation"
             else:
-                print("❌ Weak correlation")
+                strength = "❌ Weak correlation"
+
+            print(strength)
+
+            # 显示相关性方向和含义
+            if correlation > 0:
+                print("📈 Positive correlation: Higher difficulty → Higher complexity score")
+            elif correlation < 0:
+                print("📉 Negative correlation: Higher difficulty → Lower complexity score")
+                print("⚠️ This might indicate a mapping issue or unexpected model behavior")
+            else:
+                print("➡️ No linear correlation detected")
+
+            # 额外的解释
+            print(f"\n💡 Interpretation:")
+            print(f"   • {abs_correlation * 100:.1f}% of difficulty variation is captured by complexity score")
+            print(f"   • {(1 - abs_correlation) * 100:.1f}% remains unexplained by current features")
+
         else:
             correlation = 0
             print("\n⚠️ Cannot compute correlation with only one difficulty level")
