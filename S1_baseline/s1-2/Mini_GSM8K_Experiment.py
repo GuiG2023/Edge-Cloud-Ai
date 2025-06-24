@@ -106,12 +106,12 @@ class FixedGSM8KProcessor:
 
     def classify_difficulty(self, steps: int) -> str:
         """修复的难度分级 - 适应真实GSM8K分布"""
-        if steps <= 3:
+        if steps <= 4:
             return "simple"  # 放宽simple标准
-        elif steps <= 6:
+        elif steps <= 8:
             return "medium"  # 调整medium范围
         else:
-            return "complex"  # 7+步为complex
+            return "complex"  # 8+步为complex
 
     def analyze_step_distribution(self):
         """分析步骤分布，帮助调试"""
@@ -209,7 +209,7 @@ class RobustAttentionAnalyzer:
             'variance': 0.35,
             'concentration': 0.15
         }
-        self.threshold = 0.35  # 基于观察到的分数范围调整
+        self.threshold = 0.160  # 基于观察到的分数范围调整
         self.device = device
         print(f"🎯 Analyzer initialized - Threshold: {self.threshold}")
 
