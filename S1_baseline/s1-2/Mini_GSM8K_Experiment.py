@@ -85,6 +85,7 @@ class FixedGSM8KProcessor:
         except:
             return False
 
+#多维度步骤识别综合判断推理复杂度
     def count_solution_steps(self, answer: str) -> int:
         """改进的步骤计数算法"""
         # 方法1: 计算行数（每行一个逻辑步骤）
