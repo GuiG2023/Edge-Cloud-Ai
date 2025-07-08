@@ -1053,64 +1053,16 @@ def get_secure_token():
     return getpass.getpass("Token: ")
 
 
-def test_routing_consistency():
-    """测试步骤分析路由器与数据分类的一致性"""
-    print("🔍 测试路由器一致性...")
-
-    # 创建测试数据处理器
-    data_processor = FixedGSM8KProcessor(max_samples=100)
-    simple_problems, complex_problems = data_processor.get_balanced_sample(40, 0.5)
-
-    # 创建路由器
-    router = ConsistentComplexityRouter(threshold_steps=4)
-
-    correct_simple = 0
-    correct_complex = 0
-
-    print("\n🔍 测试简单问题路由:")
-    for i, problem in enumerate(simple_problems[:10]):
-        question = problem['question']
-        steps = problem['steps']
-        route = router.route(question)
-        complexity_score = router.estimate_question_complexity(question)
-
-        is_correct = (route == "SLM")
-        if is_correct:
-            correct_simple += 1
-
-        print(
-            f"  {i + 1}. 步骤数: {steps}, 复杂度得分: {complexity_score:.1f}, 路由: {route} {'✅' if is_correct else '❌'}")
-
-    print("\n🔍 测试复杂问题路由:")
-    for i, problem in enumerate(complex_problems[:10]):
-        question = problem['question']
-        steps = problem['steps']
-        route = router.route(question)
-        complexity_score = router.estimate_question_complexity(question)
-
-        is_correct = (route == "LLM")
-        if is_correct:
-            correct_complex += 1
-
-        print(
-            f"  {i + 1}. 步骤数: {steps}, 复杂度得分: {complexity_score:.1f}, 路由: {route} {'✅' if is_correct else '❌'}")
-
-    total_accuracy = (correct_simple + correct_complex) / 20
-    print(f"\n📊 路由一致性测试结果:")
-    print(f"   简单问题准确率: {correct_simple}/10 = {correct_simple * 10}%")
-    print(f"   复杂问题准确率: {correct_complex}/10 = {correct_complex * 10}%")
-    print(f"   总体准确率: {total_accuracy:.1%}")
-
-    return total_accuracy
+def test_model_access(hf_token):
     """测试token是否可以访问指定的模型"""
     try:
         login(token=hf_token)
         print("✅ HuggingFace token valid")
 
-        # 测试Llama-3.2-1B访问
-        print("🔄 Testing Llama-3.2-1B access...")
+        # 测试Llama-3.2-3B访问
+        print("🔄 Testing Llama-3.2-3B access...")
         llama32_tokenizer = AutoTokenizer.from_pretrained("meta-llama/Llama-3.2-3B")
-        print("✅ Llama-3.2-1B access successful")
+        print("✅ Llama-3.2-3B access successful")
 
         # 测试Llama-3.1-8B访问
         print("🔄 Testing Llama-3.1-8B access...")
