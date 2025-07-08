@@ -617,8 +617,8 @@ class GSM8KAccuracyEvaluator:
 
         # 配置模型
         self.slm_config = ModelConfig(
-            name="TinyLlama-1.1B-Chat",
-            model_path="TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+            name="Llama-3.2-3B",
+            model_path="meta-llama/Llama-3.2-3B",
             cost_per_token=0.001,
             avg_latency_ms=100
         )
