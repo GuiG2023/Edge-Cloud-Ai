@@ -1109,7 +1109,7 @@ def test_routing_consistency():
 
         # 测试Llama-3.2-1B访问
         print("🔄 Testing Llama-3.2-1B access...")
-        llama32_tokenizer = AutoTokenizer.from_pretrained("meta-llama/Llama-3.2-1B-Instruct")
+        llama32_tokenizer = AutoTokenizer.from_pretrained("meta-llama/Llama-3.2-3B")
         print("✅ Llama-3.2-1B access successful")
 
         # 测试Llama-3.1-8B访问
