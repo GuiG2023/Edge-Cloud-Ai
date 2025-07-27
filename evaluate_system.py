@@ -4,7 +4,7 @@ import os
 from common_utils import GSM8KAccuracyEvaluator # 从共享文件导入
 
 # 在脚本的开头
-PROJECT_PATH = os.getenv('PROJECT_PATH_GDRIVE', '.') # 如果环境变量不存在，则默认为当前目录
+PROJECT_PATH = os.getenv('PROJECT_PATH_GDRIVE', 'S2_enhanced/GSM8K_Router_Project') # 如果环境变量不存在，则默认为当前目录
 
 if __name__ == "__main__":
     print("--- 启动智能路由系统评估流程 ---")

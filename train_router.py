@@ -9,7 +9,7 @@ from common_utils import GSM8KAccuracyEvaluator, device  # 从共享文件导入
 
 # 在脚本的开头
 import os
-PROJECT_PATH = os.getenv('PROJECT_PATH_GDRIVE', '.') # 如果环境变量不存在，则默认为当前目录
+PROJECT_PATH = os.getenv('PROJECT_PATH_GDRIVE', 'S2_enhanced/GSM8K_Router_Project') # 如果环境变量不存在，则默认为当前目录
 
 
 # --- 此处粘贴上一回答中的 RouterDataset 和 generate_router_training_data 函数 ---
