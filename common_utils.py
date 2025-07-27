@@ -20,28 +20,17 @@ else:
     device = torch.device('cpu')
     print("💻 Using CPU")
 
-# ========================= 此处粘贴所有共享的类定义 =========================
-# ModelConfig, ModelInterface, FixedGSM8KProcessor, ComplexityPredictorNet,
-# LearnedAttentionRouter, SLMInterface, EnhancedLLMInterface,
-# AccuracyValidator, GSM8KAccuracyEvaluator
-#
-# 注意：您需要将我们之前讨论过的所有类的【完整代码】粘贴到这里。
-# 为保持本回答的简洁性，这里只展示一个框架。
-# ========================================================================
-
+# ========================= 基础配置类 =========================
 class ModelConfig:
     """模型配置类"""
-
     def __init__(self, name: str, model_path: str, cost_per_token: float, avg_latency_ms: int):
         self.name = name
         self.model_path = model_path
         self.cost_per_token = cost_per_token
         self.avg_latency_ms = avg_latency_ms
 
-
 class ModelInterface:
     """模型接口基类"""
-
     def __init__(self, config: ModelConfig):
         self.config = config
         self.model = None
@@ -50,136 +39,83 @@ class ModelInterface:
     def predict(self, question: str) -> str:
         raise NotImplementedError
 
-
 # ========================= GSM8K数据处理器 =========================
 class FixedGSM8KProcessor:
     """修复版GSM8K数据处理器"""
-
     def __init__(self, data_path="gsm8k_data/train.jsonl", max_samples=1000):
         print(f"📚 Loading GSM8K dataset...")
         self.data_path = data_path
         self.max_samples = max_samples
         self.samples = []
-
-        # 尝试多种加载方式
         if self._load_from_datasets():
             print(f"✅ Loaded {len(self.samples)} samples from datasets library")
         elif self._load_from_local():
             print(f"✅ Loaded {len(self.samples)} samples from local file")
         else:
-            print("🔄 Using enhanced fallback data...")
-            self.samples = self._create_balanced_fallback()
+            print("❌ Critical Error: Could not load GSM8K data from any source.")
 
     def _load_from_datasets(self):
-        """从datasets库加载GSM8K"""
         try:
             from datasets import load_dataset
             print("🔄 Loading from HuggingFace datasets...")
-
-            # 使用GSM8K的test集，因为它有标准答案
             dataset = load_dataset("gsm8k", "main")
-            test_data = dataset['test']
-
-            for i in range(min(self.max_samples, len(test_data))):
-                self.samples.append({
-                    'question': test_data[i]['question'],
-                    'answer': test_data[i]['answer']
-                })
+            # 使用训练集生成训练数据，测试集用于最终评估
+            data_split = dataset['train']
+            for i in range(min(self.max_samples, len(data_split))):
+                self.samples.append({'question': data_split[i]['question'], 'answer': data_split[i]['answer']})
             return len(self.samples) > 0
         except Exception as e:
-            print(f"⚠️ Failed to load from datasets: {e}")
-            return False
+            print(f"⚠️ Failed to load from datasets: {e}"); return False
 
     def _load_from_local(self):
-        """从本地文件加载"""
         try:
-            if not os.path.exists(self.data_path):
-                return False
-
+            if not os.path.exists(self.data_path): return False
             with open(self.data_path, 'r', encoding='utf-8') as f:
-                for line_num, line in enumerate(f, 1):
+                for line in f:
                     if line.strip():
                         try:
-                            data = json.loads(line)
-                            self.samples.append({
-                                'question': data['question'],
-                                'answer': data['answer']
-                            })
-                            if len(self.samples) >= self.max_samples:
-                                break
-                        except:
-                            continue
+                            self.samples.append(json.loads(line))
+                            if len(self.samples) >= self.max_samples: break
+                        except: continue
             return len(self.samples) > 0
-        except:
-            return False
-
-    # def _create_balanced_fallback(self):
-    #     """创建平衡的后备数据集"""
-    #     fallback_data = [
-    #         {'question': "Janet has 3 apples. She eats 1 apple. How many apples does she have left?",
-    #          'answer': "Janet starts with 3 apples.\nShe eats 1 apple.\n3 - 1 = 2\n#### 2"},
-    #         {'question': "Tom bought 5 books for $2 each. How much did he spend in total?",
-    #          'answer': "Tom bought 5 books.\nEach book costs $2.\n5 × 2 = 10\n#### 10"},
-    #         {
-    #             'question': "A store sells apples for $3 per kg. If John buys 2.5 kg and pays with a $10 bill, how much change does he get?",
-    #             'answer': "Cost per kg: $3\nAmount bought: 2.5 kg\nTotal cost: 3 × 2.5 = $7.50\nPaid: $10\nChange: 10 - 7.50 = $2.50\n#### 2.5"},
-    #         {
-    #             'question': "A company has 120 employees. 25% work in sales, 30% in engineering, and the rest in administration. If the sales team gets a 15% increase and engineering gets a 10% increase, how many total employees will there be after the increases?",
-    #             'answer': "Initial employees: 120\nSales: 25% of 120 = 0.25 × 120 = 30 employees\nEngineering: 30% of 120 = 0.30 × 120 = 36 employees\nAdministration: 120 - 30 - 36 = 54 employees\n\nAfter increases:\nSales increase: 30 × 0.15 = 4.5 ≈ 5 new employees\nEngineering increase: 36 × 0.10 = 3.6 ≈ 4 new employees\n\nTotal after increases: 120 + 5 + 4 = 129 employees\n#### 129"}
-    #     ]
-    #     print(f"✅ Created {len(fallback_data)} fallback samples")
-    #     return fallback_data
+        except: return False
 
     def extract_answer(self, answer_text: str) -> str:
-        """从GSM8K的答案文本中提取数值"""
-        match = re.search(r'####\s*([+-]?\d+(?:\.\d+)?)', answer_text)
-        if match: return match.group(1)
-        numbers = re.findall(r'([+-]?\d+(?:\.\d+)?)', answer_text)
-        return numbers[-1] if numbers else "No answer found"
+        match = re.search(r'####\s*([+-]?[\d,]+(?:\.\d+)?)', answer_text)
+        if match: return match.group(1).replace(',', '')
+        numbers = re.findall(r'([+-]?[\d,]+(?:\.\d+)?)', answer_text)
+        return numbers[-1].replace(',', '') if numbers else "No answer found"
 
     def count_solution_steps(self, answer: str) -> int:
-        """多维度步骤识别综合判断推理复杂度"""
         lines = [line.strip() for line in answer.split('\n') if line.strip()]
         meaningful_lines = [line for line in lines if not line.startswith('####')]
         math_operations = len(re.findall(r'\d+\s*[+\-×÷*/]\s*\d+', answer))
         equals_count = answer.count('=')
-        step_words = len(re.findall(r'\b(then|next|so|therefore|thus|after|now|finally)\b', answer.lower()))
-        steps = max(len(meaningful_lines) - 1, math_operations, equals_count, step_words, 1)
-        return min(steps, 12)
+        return max(len(meaningful_lines) - 1, math_operations, equals_count, 1)
 
     def classify_difficulty(self, steps: int) -> str:
-        """修复的难度分级 - 适应真实GSM8K分布"""
-        if steps <= 4:
-            return "simple"
-        elif steps <= 8:
-            return "medium"
-        else:
-            return "complex"
+        if steps <= 4: return "simple"
+        elif steps <= 8: return "medium"
+        else: return "complex"
 
     def get_balanced_sample(self, n_total: int = 200, simple_ratio: float = 0.5) -> Tuple[List, List]:
-        """获取平衡的样本数据，按步骤数分类"""
         print(f"🎯 准备采样 {n_total} 道题目 (简单题比例: {simple_ratio:.1%})")
         simple_problems, complex_problems = [], []
         print("📋 正在分析问题复杂度...")
         for i, item in enumerate(self.samples):
-            if i % 100 == 0 and i > 0: print(f"   处理进度: {i}/{len(self.samples)}")
-            problem_data = {'question': item['question'], 'answer': self.extract_answer(item['answer']),
-                            'original_answer': item['answer'], 'steps': self.count_solution_steps(item['answer']),
-                            'difficulty': self.classify_difficulty(self.count_solution_steps(item['answer']))}
-            if problem_data['difficulty'] == "simple":
-                simple_problems.append(problem_data)
-            else:
-                complex_problems.append(problem_data)
+            steps = self.count_solution_steps(item['answer'])
+            problem_data = {'question': item['question'], 'answer': self.extract_answer(item['answer']), 'difficulty': self.classify_difficulty(steps)}
+            if problem_data['difficulty'] == "simple": simple_problems.append(problem_data)
+            else: complex_problems.append(problem_data)
         print(f"✅ 分类完成: {len(simple_problems)} 简单题, {len(complex_problems)} 复杂题")
-        n_simple, n_complex = int(n_total * simple_ratio), n_total - int(n_total * simple_ratio)
-        if len(simple_problems) < n_simple: n_simple = len(simple_problems)
-        if len(complex_problems) < n_complex: n_complex = len(complex_problems)
-        sampled_simple = random.sample(simple_problems, n_simple) if n_simple > 0 else []
-        sampled_complex = random.sample(complex_problems, n_complex) if n_complex > 0 else []
+        n_simple = int(n_total * simple_ratio)
+        n_complex = n_total - n_simple
+        sampled_simple = random.sample(simple_problems, min(n_simple, len(simple_problems)))
+        sampled_complex = random.sample(complex_problems, min(n_complex, len(complex_problems)))
         print(f"🎲 最终采样: {len(sampled_simple)} 简单题, {len(sampled_complex)} 复杂题")
         return sampled_simple, sampled_complex
 
-
+# ========================= 可训练的复杂度预测网络 =========================
 class ComplexityPredictorNet(nn.Module):
     """一个简单的神经网络，用于从注意力特征中学习并预测任务复杂度。"""
     def __init__(self, input_features: int = 8):
@@ -192,10 +128,214 @@ class ComplexityPredictorNet(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.network(x)
 
+# ========================= 可学习的智能路由器 =========================
 class LearnedAttentionRouter:
-    # ... (粘贴完整的类定义)
-    pass
+    """使用一个预训练好的神经网络来代替固定规则，进行路由决策。"""
+    def __init__(self, model_path: str, device, threshold=0.5):
+        self.device = device
+        self.threshold = threshold
+        self.model_path = model_path
+        print(f"🧠 Initializing LearnedAttentionRouter...")
+        self.predictor_net = ComplexityPredictorNet(input_features=8).to(self.device)
+        if os.path.exists(self.model_path):
+            print(f"   Loading learned predictor from: {self.model_path}")
+            self.predictor_net.load_state_dict(torch.load(self.model_path, map_location=self.device))
+            self.predictor_net.eval()
+            print("   ✅ Learned predictor loaded successfully.")
+        else:
+            print(f"   ⚠️ Model file {self.model_path} not found! Router will be untrained.")
+            print("   💡 Run 'train_router.py' first to create this file.")
 
+    def route(self, question: str, slm_model, slm_tokenizer) -> Tuple[str, float]:
+        try:
+            features = self.extract_core_features(question, slm_model, slm_tokenizer)
+            prediction = self.predict_complexity(features)
+            route_decision = "LLM" if prediction['is_complex'] else "SLM"
+            return route_decision, prediction['complexity_score']
+        except Exception as e:
+            print(f"⚠️ Route decision failed: {e}, defaulting to LLM")
+            return "LLM", 1.0
+
+    def predict_complexity(self, features: dict) -> dict:
+        feature_vector = torch.tensor([
+            features['avg_entropy'], features['entropy_std'], features['max_entropy'],
+            features['avg_variance'], features['variance_std'], features['max_variance'],
+            features['avg_max_attention'], features['concentration_std']
+        ], dtype=torch.float32).to(self.device)
+        with torch.no_grad():
+            logit = self.predictor_net(feature_vector.unsqueeze(0))
+            probability = torch.sigmoid(logit).item()
+        return {'complexity_score': probability, 'is_complex': probability > self.threshold}
+
+    def extract_core_features(self, text: str, model, tokenizer) -> dict:
+        model_device = next(model.parameters()).device
+        inputs = tokenizer(text, return_tensors="pt", max_length=200, truncation=True, padding=True)
+        inputs = {k: v.to(model_device) for k, v in inputs.items()}
+        with torch.no_grad():
+            outputs = model(**inputs, output_attentions=True)
+        attentions = outputs.attentions[-1][0].cpu()
+        seq_len = inputs['attention_mask'].sum().item()
+        entropy_features = self._compute_entropy(attentions, seq_len)
+        variance_features = self._compute_variance(attentions, seq_len)
+        concentration_features = self._compute_concentration(attentions, seq_len)
+        return {**entropy_features, **variance_features, **concentration_features}
+
+    def _compute_entropy(self, attentions, seq_len):
+        all_entropies = [-torch.sum((attentions[h, p, :seq_len] + 1e-9) * torch.log(attentions[h, p, :seq_len] + 1e-9)).item() for h in range(attentions.shape[0]) for p in range(seq_len)]
+        return {'avg_entropy': np.mean(all_entropies), 'entropy_std': np.std(all_entropies), 'max_entropy': np.max(all_entropies)}
+    def _compute_variance(self, attentions, seq_len):
+        variances = [torch.var(attentions[h, p, :seq_len]).item() for h in range(attentions.shape[0]) for p in range(seq_len)]
+        return {'avg_variance': np.mean(variances), 'variance_std': np.std(variances), 'max_variance': np.max(variances)}
+    def _compute_concentration(self, attentions, seq_len):
+        max_attentions = [torch.max(attentions[h, p, :seq_len]).item() for h in range(attentions.shape[0]) for p in range(seq_len)]
+        return {'avg_max_attention': np.mean(max_attentions), 'concentration_std': np.std(max_attentions)}
+
+# ========================= SLM/LLM接口 和 准确率验证器 =========================
+class SLMInterface(ModelInterface):
+    def load_model(self):
+        print(f"🔄 Loading SLM: {self.config.name}")
+        try:
+            self.tokenizer = AutoTokenizer.from_pretrained(self.config.model_path, trust_remote_code=True)
+            self.model = AutoModelForCausalLM.from_pretrained(self.config.model_path, torch_dtype=torch.float16, device_map="auto" if torch.cuda.is_available() else None, trust_remote_code=True, output_attentions=True)
+            if self.tokenizer.pad_token is None: self.tokenizer.pad_token = self.tokenizer.eos_token
+            print("✅ SLM loaded successfully")
+        except Exception as e: print(f"❌ Failed to load SLM: {e}"); raise
+
+    def predict(self, question: str) -> str:
+        if self.model is None: self.load_model()
+        prompt = f"Question: {question}\nAnswer: Let me solve this step by step.\n"
+        inputs = self.tokenizer.encode(prompt, return_tensors="pt", max_length=1024, truncation=True)
+        if torch.cuda.is_available(): inputs = inputs.to(self.model.device)
+        with torch.no_grad():
+            outputs = self.model.generate(inputs, max_new_tokens=200, num_return_sequences=1, do_sample=False, pad_token_id=self.tokenizer.eos_token_id)
+        full_response = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
+        return full_response[len(prompt):].strip()
+
+class EnhancedLLMInterface(ModelInterface):
+    def __init__(self, config: ModelConfig, hf_token: str = None):
+        super().__init__(config)
+        self.hf_token = hf_token
+
+    def setup_authentication(self):
+        if self.hf_token: login(token=self.hf_token)
+        elif os.getenv('HUGGINGFACE_TOKEN'): print("Found token in environment.")
+        else: print("⚠️ No HuggingFace token provided.")
+
+    def load_model(self):
+        print(f"🔄 Loading LLM: {self.config.name}"); self.setup_authentication()
+        try:
+            self.tokenizer = AutoTokenizer.from_pretrained(self.config.model_path, trust_remote_code=True)
+            self.model = AutoModelForCausalLM.from_pretrained(self.config.model_path, torch_dtype=torch.bfloat16, device_map="auto", trust_remote_code=True)
+            if self.tokenizer.pad_token is None: self.tokenizer.pad_token = self.tokenizer.eos_token
+            print(f"✅ LLM loaded successfully on {next(self.model.parameters()).device}")
+        except Exception as e: print(f"❌ Failed to load LLM: {e}"); raise
+
+    def predict(self, question: str) -> str:
+        if self.model is None: self.load_model()
+        prompt = f"<|begin_of_text|><|start_header_id|>user<|end_header_id|>\n\nSolve the following math problem step by step: {question}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n"
+        inputs = self.tokenizer.encode(prompt, return_tensors="pt").to(next(self.model.parameters()).device)
+        with torch.no_grad():
+            outputs = self.model.generate(inputs, max_new_tokens=300, num_return_sequences=1, do_sample=False, pad_token_id=self.tokenizer.eos_token_id)
+        full_response = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
+        return re.sub(r"(?s).*\<\|start_header_id\|\>assistant\<\|end_header_id\|\>\n", "", full_response, 1).strip()
+
+class AccuracyValidator:
+    @staticmethod
+    def extract_final_answer(response: str) -> str:
+        patterns = [r'[Tt]he final answer is .*?([+-]?[\d,]+(?:\.\d+)?)', r'####\s*([+-]?[\d,]+(?:\.\d+)?)', r'is\s*\$([+-]?[\d,]+(?:\.\d+)?)', r'is\s*([+-]?[\d,]+(?:\.\d+)?)']
+        for pattern in patterns:
+            match = re.search(pattern, response)
+            if match: return match.group(1).replace(',', '')
+        numbers = re.findall(r'([+-]?[\d,]+(?:\.\d+)?)', response)
+        return numbers[-1].replace(',', '') if numbers else "No answer found"
+
+    @staticmethod
+    def is_correct(predicted: str, ground_truth: str, tolerance: float = 1e-9) -> bool:
+        try:
+            return abs(float(predicted) - float(ground_truth)) <= tolerance
+        except (ValueError, TypeError): return str(predicted).strip().lower() == str(ground_truth).strip().lower()
+
+# ========================= 主评估器 =========================
 class GSM8KAccuracyEvaluator:
-    # ... (粘贴完整的类定义)
-    pass
+    def __init__(self, hf_token=None, max_samples=1000, project_path="."):
+        self.project_path = project_path
+        self.hf_token = hf_token
+        self.validator = AccuracyValidator()
+        self.data_processor = FixedGSM8KProcessor(max_samples=max_samples)
+        self.slm_config = ModelConfig(name="Llama-3.2-3B", model_path="meta-llama/Llama-3.2-3B", cost_per_token=0.001, avg_latency_ms=100)
+        self.llm_config = ModelConfig(name="Llama-3.1-8B-Instruct", model_path="meta-llama/Llama-3.1-8B-Instruct", cost_per_token=0.003, avg_latency_ms=800)
+        self.slm = SLMInterface(self.slm_config)
+        self.llm = EnhancedLLMInterface(self.llm_config, hf_token)
+        self.router = None
+
+    def _ensure_slm_loaded(self):
+        if self.slm.model is None: self.slm.load_model()
+        if self.router is None:
+            router_model_path = os.path.join(self.project_path, "router_model.pth")
+            self.router = LearnedAttentionRouter(model_path=router_model_path, device=device, threshold=0.5)
+
+    def evaluate_model_on_problems(self, model_interface, problems, model_name, max_problems=None):
+        print(f"\n🔍 评估 {model_name}...")
+        if max_problems and len(problems) > max_problems:
+            problems = random.sample(problems, max_problems)
+        correct_count, total_count, detailed_results, error_cases = 0, len(problems), [], []
+        for i, problem in enumerate(problems):
+            print(f"   处理问题 {i + 1}/{total_count}...", end="\r")
+            try:
+                response = model_interface.predict(problem['question'])
+                predicted_answer = self.validator.extract_final_answer(response)
+                is_correct = self.validator.is_correct(predicted_answer, problem['answer'])
+                if is_correct: correct_count += 1
+                else: error_cases.append({'q': problem['question'][:100], 'gt': problem['answer'], 'pred': predicted_answer})
+                detailed_results.append({'is_correct': is_correct})
+            except Exception as e:
+                print(f"   ⚠️ 处理错误: {e}"); detailed_results.append({'is_correct': False})
+        print()
+        accuracy = correct_count / total_count if total_count > 0 else 0
+        print(f"✅ {model_name} 准确率: {accuracy:.2%} ({correct_count}/{total_count})")
+        return {'accuracy': accuracy, 'correct_count': correct_count, 'total_count': total_count, 'detailed_results': detailed_results}
+
+    def evaluate_routing_accuracy(self, simple_problems, complex_problems):
+        print("\n🧭 评估路由准确性...")
+        self._ensure_slm_loaded()
+        correct_routes, total_routes, routing_details = 0, 0, []
+        for p_type, problems, expected in [("simple", simple_problems, "SLM"), ("complex", complex_problems, "LLM")]:
+            for problem in problems:
+                route, _ = self.router.route(problem['question'], self.slm.model, self.slm.tokenizer)
+                if route == expected: correct_routes += 1
+                total_routes += 1
+        accuracy = correct_routes / total_routes if total_routes > 0 else 0
+        print(f"✅ 路由准确率: {accuracy:.2%} ({correct_routes}/{total_routes})")
+        return {'routing_accuracy': accuracy, 'correct_routes': correct_routes, 'total_routes': total_routes}
+
+    def run_gsm8k_evaluation(self, n_samples=200, simple_ratio=0.5):
+        print("="*60 + "\n🚀 开始评估\n" + "="*60)
+        simple, complex = self.data_processor.get_balanced_sample(n_total=n_samples, simple_ratio=simple_ratio)
+        slm_simple = self.evaluate_model_on_problems(self.slm, simple, "SLM on Simple")
+        llm_complex = self.evaluate_model_on_problems(self.llm, complex, "LLM on Complex")
+        slm_complex = self.evaluate_model_on_problems(self.slm, complex, "SLM on Complex (X-Eval)", max_problems=50)
+        llm_simple = self.evaluate_model_on_problems(self.llm, simple, "LLM on Simple (X-Eval)", max_problems=50)
+        routing = self.evaluate_routing_accuracy(simple, complex)
+        smart_routing = self._calculate_smart_routing_performance(slm_simple, llm_complex, routing)
+        self._generate_final_report(slm_simple, llm_complex, slm_complex, llm_simple, routing, smart_routing, n_samples)
+
+    def _calculate_smart_routing_performance(self, slm_res, llm_res, rout_res):
+        rout_acc, slm_acc, llm_acc = rout_res['routing_accuracy'], slm_res['accuracy'], llm_res['accuracy']
+        simple_ratio = slm_res['total_count'] / max(1, slm_res['total_count'] + llm_res['total_count'])
+        est_acc = ((slm_acc * simple_ratio) + (llm_acc * (1 - simple_ratio))) * rout_acc + ((slm_res.get('accuracy_on_complex', 0) * (1-simple_ratio)) + (llm_res.get('accuracy_on_simple', 1) * simple_ratio)) * (1-rout_acc)
+        smart_cost = simple_ratio * self.slm_config.cost_per_token + (1-simple_ratio) * self.llm_config.cost_per_token
+        return {'estimated_accuracy': est_acc, 'cost_per_problem': smart_cost, 'cost_savings_vs_llm': (self.llm_config.cost_per_token - smart_cost) / self.llm_config.cost_per_token}
+
+    def _generate_final_report(self, s_s, l_c, s_c, l_s, r, s_r, n):
+        print("\n" + "="*70 + "\n📋 评估报告\n" + "="*70)
+        print(f"📊 评估规模: {n} 道题")
+        print(f"\n🎯 核心性能:\n├── SLM on Simple: {s_s['accuracy']:.2%}\n├── LLM on Complex: {l_c['accuracy']:.2%}\n├── Router Accuracy: {r['routing_accuracy']:.2%}\n└── Smart System Est. Accuracy: {s_r['estimated_accuracy']:.2%}")
+        print(f"\n📊 交叉验证:\n├── SLM on Complex: {s_c['accuracy']:.2%}\n├── LLM on Simple: {l_s['accuracy']:.2%}")
+        print(f"\n💰 成本效益:\n├── SLM Cost: ${self.slm_config.cost_per_token:.4f}\n├── LLM Cost: ${self.llm_config.cost_per_token:.4f}\n├── Smart Route Cost: ${s_r['cost_per_problem']:.4f}\n├── Savings vs LLM: {s_r['cost_savings_vs_llm']:.1%}")
+        slm_ok, rout_ok, cost_ok = s_s['accuracy'] >= 0.8, r['routing_accuracy'] >= 0.85, s_r['cost_savings_vs_llm'] >= 0.3
+        print(f"\n💡 关键判断:\n├── SLM Reliability: {'✅' if slm_ok else '❌'}\n├── Router Reliability: {'✅' if rout_ok else '❌'}\n└── Cost-Benefit: {'✅' if cost_ok else '❌'}")
+        if slm_ok and rout_ok and cost_ok: rec = "✅ 强烈推荐"
+        elif not slm_ok: rec = "❌ 不推荐 - SLM不可靠"
+        elif not rout_ok: rec = "❌ 不推荐 - 路由不准确"
+        else: rec = "⚠️ 谨慎考虑 - 成本效益有限"
+        print(f"\n🎯 最终建议: {rec}")
