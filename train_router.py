@@ -1,6 +1,7 @@
 import os
 import json
 import torch
+from torch import nn
 import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
 from common_utils import GSM8KAccuracyEvaluator, device, LearnedAttentionRouter, AccuracyValidator
