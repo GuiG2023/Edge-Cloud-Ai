@@ -196,7 +196,7 @@ class SLMInterface(ModelInterface):
         print(f"🔄 Loading SLM: {self.config.name}")
         try:
             self.tokenizer = AutoTokenizer.from_pretrained(self.config.model_path, trust_remote_code=True)
-            self.model = AutoModelForCausalLM.from_pretrained(self.config.model_path, torch_dtype=torch.float16, device_map="auto" if torch.cuda.is_available() else None, trust_remote_code=True, output_attentions=True)
+            self.model = AutoModelForCausalLM.from_pretrained(self.config.model_path, torch_dtype=torch.float16, device_map="auto" if torch.cuda.is_available() else None, trust_remote_code=True, output_attentions=True,attn_implementation="eager" )
             if self.tokenizer.pad_token is None: self.tokenizer.pad_token = self.tokenizer.eos_token
             print("✅ SLM loaded successfully")
         except Exception as e: print(f"❌ Failed to load SLM: {e}"); raise
