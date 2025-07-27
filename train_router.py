@@ -7,40 +7,85 @@ from torch.utils.data import Dataset, DataLoader
 from common_utils import GSM8KAccuracyEvaluator, device, LearnedAttentionRouter, AccuracyValidator
 
 
+# ========================================================================
+# ===== 在 train_router.py 文件中，使用这个新版本的函数来替换旧的 =====
+# ========================================================================
+
 def generate_router_training_data(evaluator, output_file):
-    print("\n" + "=" * 50 + "\n🧠 Generating router training data...\n" + "=" * 50)
+    """
+    生成用于训练路由器的数据集。
+    【【【健壮版：支持实时保存和断点续传】】】
+    """
+    print("\n" + "=" * 50 + "\n🧠 Generating router training data (Resumable Mode)...\n" + "=" * 50)
+
+    # --- 新增：断点续传逻辑 ---
+    processed_samples = set()
+    processed_count = 0
+    # 检查输出文件是否已存在，如果存在，则读取已处理过的问题
+    if os.path.exists(output_file):
+        with open(output_file, 'r', encoding='utf-8') as f:
+            for line in f:
+                try:
+                    data = json.loads(line)
+                    # 假设每个question是唯一的标识符
+                    if 'question' in data:
+                        processed_samples.add(data['question'])
+                except:
+                    continue
+        processed_count = len(processed_samples)
+        print(f"🔄 Found existing data file with {processed_count} samples. Resuming...")
+
+    # 确保SLM已加载
     evaluator._ensure_slm_loaded()
     slm_interface = evaluator.slm
     all_problems = evaluator.data_processor.samples
-    print(f"📊 Processing {len(all_problems)} problems to generate features and labels.")
+    print(f"📊 Total problems to process: {len(all_problems)}. Already processed: {processed_count}.")
 
-    training_samples = []
-    # Use a temporary router instance just for its feature extraction method
-    temp_feature_extractor = LearnedAttentionRouter("dummy_path.pth", device)
-    validator = AccuracyValidator()
+    # --- 修改：以追加模式('a')打开文件 ---
+    with open(output_file, 'a', encoding='utf-8') as f:
+        # 使用临时的、未训练的路由器实例来提取特征
+        temp_feature_extractor = LearnedAttentionRouter("dummy_path.pth", device)
+        validator = AccuracyValidator()
 
-    for i, problem in enumerate(all_problems):
-        if i % 20 == 0 and i > 0: print(f"   Progress: {i}/{len(all_problems)}")
-        try:
-            slm_response = slm_interface.predict(problem['question'])
-            slm_answer = validator.extract_final_answer(slm_response)
-            gt_answer = evaluator.data_processor.extract_answer(problem['answer'])
-            is_slm_correct = validator.is_correct(slm_answer, gt_answer)
+        for i, problem in enumerate(all_problems):
+            # --- 新增：跳过已处理的样本 ---
+            if problem['question'] in processed_samples:
+                continue
 
-            label = 1.0 if not is_slm_correct else 0.0
-            features = temp_feature_extractor.extract_core_features(
-                problem['question'], slm_interface.model, slm_interface.tokenizer
-            )
-            training_samples.append({"features": features, "label": label})
-        except Exception as e:
-            print(f"   ⚠️ Skipped problem {i} due to error: {e}")
-            continue
+            # 打印进度
+            current_progress = processed_count + 1
+            print(f"   Progress: {current_progress}/{len(all_problems)}", end="\r")
 
-    with open(output_file, 'w', encoding='utf-8') as f:
-        for sample in training_samples: f.write(json.dumps(sample) + '\n')
-    print(f"\n✅ Training data generation complete! {len(training_samples)} samples saved to {output_file}")
+            try:
+                # 核心逻辑与之前相同
+                slm_response = slm_interface.predict(problem['question'])
+                slm_answer = validator.extract_final_answer(slm_response)
+                gt_answer = evaluator.data_processor.extract_answer(problem['answer'])
+                is_slm_correct = validator.is_correct(slm_answer, gt_answer)
 
+                label = 1.0 if not is_slm_correct else 0.0
+                features = temp_feature_extractor.extract_core_features(
+                    problem['question'], slm_interface.model, slm_interface.tokenizer
+                )
 
+                sample_to_save = {
+                    "question": problem['question'],  # 新增question用于去重
+                    "features": features,
+                    "label": label
+                }
+
+                # --- 修改：处理完一个就立刻写入文件 ---
+                f.write(json.dumps(sample_to_save) + '\n')
+                f.flush()  # 确保内容立即写入磁盘
+                processed_count += 1
+                processed_samples.add(problem['question'])
+
+            except Exception as e:
+                # 打印更详细的错误
+                print(f"\n   ⚠️ Skipped problem #{i} ('{problem['question'][:30]}...') due to error: {e}")
+                continue
+
+    print(f"\n✅ Training data generation complete! Total {processed_count} samples saved to {output_file}")
 class RouterDataset(Dataset):
     def __init__(self, data_path):
         self.samples = []
