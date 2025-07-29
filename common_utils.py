@@ -181,8 +181,37 @@ class LearnedAttentionRouter:
         return {**entropy_features, **variance_features, **concentration_features}
 
     def _compute_entropy(self, attentions, seq_len):
-        all_entropies = [-torch.sum((attentions[h, p, :seq_len] + 1e-9) * torch.log(attentions[h, p, :seq_len] + 1e-9)).item() for h in range(attentions.shape[0]) for p in range(seq_len)]
-        return {'avg_entropy': np.mean(all_entropies), 'entropy_std': np.std(all_entropies), 'max_entropy': np.max(all_entropies)}
+        """
+        【【【数值稳定版】】】的熵计算函数
+        """
+        all_entropies = []
+        for head in range(attentions.shape[0]):
+            for pos in range(seq_len):
+                # 选取当前位置有效的注意力分布
+                attn_dist = attentions[head, pos, :seq_len]
+
+                # --- 核心修复开始 ---
+                # 1. 为防止除以0，在分母上增加一个极小值epsilon
+                #    这一步确保attn_dist是一个合法的概率分布（总和为1）
+                attn_dist_normalized = attn_dist / (torch.sum(attn_dist) + 1e-9)
+
+                # 2. 在取对数前，也增加一个极小值epsilon，防止log(0)导致NaN
+                entropy = -torch.sum(attn_dist_normalized * torch.log(attn_dist_normalized + 1e-9)).item()
+                # --- 核心修复结束 ---
+
+                all_entropies.append(entropy)
+
+        # 作为最后的保险，检查最终列表中是否仍有NaN值
+        valid_entropies = [e for e in all_entropies if not np.isnan(e)]
+        if not valid_entropies:
+            # 如果因未知原因所有计算都失败了，返回默认的0值
+            return {'avg_entropy': 0.0, 'entropy_std': 0.0, 'max_entropy': 0.0}
+
+        return {
+            'avg_entropy': np.mean(valid_entropies),
+            'entropy_std': np.std(valid_entropies),
+            'max_entropy': np.max(valid_entropies)
+        }
     def _compute_variance(self, attentions, seq_len):
         variances = [torch.var(attentions[h, p, :seq_len]).item() for h in range(attentions.shape[0]) for p in range(seq_len)]
         return {'avg_variance': np.mean(variances), 'variance_std': np.std(variances), 'max_variance': np.max(variances)}
