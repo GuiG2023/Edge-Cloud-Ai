@@ -144,7 +144,7 @@ if __name__ == "__main__":
     PROJECT_PATH = os.getenv('PROJECT_PATH_GDRIVE', '.')
     hf_token = os.getenv('HUGGINGFACE_TOKEN')
 
-    evaluator = GSM8KAccuracyEvaluator(hf_token=hf_token, max_samples=2000, project_path=PROJECT_PATH)
+    evaluator = GSM8KAccuracyEvaluator(hf_token=hf_token, max_samples=200, project_path=PROJECT_PATH)
 
     training_file = os.path.join(PROJECT_PATH, "router_training_data.jsonl")
     model_file = os.path.join(PROJECT_PATH, "router_model.pth")

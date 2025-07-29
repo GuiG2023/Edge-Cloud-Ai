@@ -11,4 +11,4 @@ if __name__ == "__main__":
         print("   Please run 'train_router.py' first.")
     else:
         evaluator = GSM8KAccuracyEvaluator(hf_token=hf_token, max_samples=1000, project_path=PROJECT_PATH)
-        evaluator.run_gsm8k_evaluation(n_samples=200, simple_ratio=0.5)
+        evaluator.run_gsm8k_evaluation(n_samples=40, simple_ratio=0.5)
