@@ -12,6 +12,8 @@ import warnings
 from typing import Dict, List, Tuple, Optional
 import random
 from torch import nn
+# 在 common_utils.py 文件顶部
+from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig # <--- 增加 BitsAndBytesConfig
 
 # GPU设置
 if torch.cuda.is_available():
@@ -289,17 +291,38 @@ class EnhancedLLMInterface(ModelInterface):
             print("⚠️ No HuggingFace token provided.")
 
     def load_model(self):
-        # ... (此方法保持不变)
-        print(f"🔄 Loading LLM: {self.config.name}");
+        print(f"🔄 Loading LLM: {self.config.name} with 4-bit quantization...")
         self.setup_authentication()
+
         try:
-            self.tokenizer = AutoTokenizer.from_pretrained(self.config.model_path, trust_remote_code=True)
-            self.model = AutoModelForCausalLM.from_pretrained(self.config.model_path, torch_dtype=torch.bfloat16,
-                                                              device_map="auto", trust_remote_code=True)
-            if self.tokenizer.pad_token is None: self.tokenizer.pad_token = self.tokenizer.eos_token
-            print(f"✅ LLM loaded successfully on {next(self.model.parameters()).device}")
+            # --- 新增：为70B模型定义4位量化配置 ---
+            bnb_config = BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_quant_type="nf4",  # 使用NF4类型进行量化，效果好
+                bnb_4bit_compute_dtype=torch.bfloat16,  # 在计算时使用bfloat16以保持精度
+                bnb_4bit_use_double_quant=True,  # 使用双重量化以节省更多显存
+            )
+
+            self.tokenizer = AutoTokenizer.from_pretrained(
+                self.config.model_path,
+                trust_remote_code=True
+            )
+
+            self.model = AutoModelForCausalLM.from_pretrained(
+                self.config.model_path,
+                quantization_config=bnb_config,  # <--- 核心修改：应用量化配置
+                device_map="auto",  # 自动将模型加载到GPU
+                trust_remote_code=True
+            )
+
+            if self.tokenizer.pad_token is None:
+                self.tokenizer.pad_token = self.tokenizer.eos_token
+
+            print(f"✅ LLM ({self.config.name}) loaded successfully in 4-bit on {next(self.model.parameters()).device}")
+
         except Exception as e:
-            print(f"❌ Failed to load LLM: {e}"); raise
+            print(f"❌ Failed to load LLM: {e}")
+            raise
 
     def predict(self, question: str) -> str:
         """
@@ -400,8 +423,21 @@ class GSM8KAccuracyEvaluator:
         self.hf_token = hf_token
         self.validator = AccuracyValidator()
         self.data_processor = FixedGSM8KProcessor(max_samples=max_samples)
-        self.slm_config = ModelConfig(name="Llama-3.2-3B", model_path="meta-llama/Llama-3.2-3B", cost_per_token=0.001, avg_latency_ms=100)
-        self.llm_config = ModelConfig(name="Llama-3.1-8B-Instruct", model_path="meta-llama/Llama-3.1-8B-Instruct", cost_per_token=0.003, avg_latency_ms=800)
+        # 升级SLM为8B模型
+        self.slm_config = ModelConfig(
+            name="Llama-3.1-8B-Instruct (New SLM)",
+            model_path="meta-llama/Llama-3.1-8B-Instruct",  # <--- 修改
+            cost_per_token=0.003,  # 成本相应调整
+            avg_latency_ms=300  # 延迟相应调整
+        )
+
+        # 升级LLM为70B模型
+        self.llm_config = ModelConfig(
+            name="Llama-3.1-70B-Instruct (New LLM)",
+            model_path="meta-llama/Llama-3.1-70B-Instruct",  # <--- 修改
+            cost_per_token=0.010,  # 成本相应调整
+            avg_latency_ms=1000  # 延迟相应调整
+        )
         self.slm = SLMInterface(self.slm_config)
         self.llm = EnhancedLLMInterface(self.llm_config, hf_token)
         self.router = None
