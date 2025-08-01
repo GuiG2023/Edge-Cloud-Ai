@@ -344,6 +344,7 @@ Let's think step by step.
 
 
 class AccuracyValidator:
+    @staticmethod
     def extract_final_answer(response: str) -> str:
         """
         【【【升级版答案提取器】】】
