@@ -381,6 +381,18 @@ class AccuracyValidator:
             return numbers[-1].replace(',', '')
 
         return "No answer found"
+
+# --- 【【【请确保这个方法存在且位于类定义内部】】】 ---
+    @staticmethod
+    def is_correct(predicted: str, ground_truth: str, tolerance: float = 1e-9) -> bool:
+        """判断答案是否正确"""
+        try:
+            pred_num = float(predicted)
+            true_num = float(ground_truth)
+            return abs(pred_num - true_num) <= tolerance
+        except (ValueError, TypeError):
+            # 如果无法转换为数字，则进行字符串比较
+            return str(predicted).strip().lower() == str(ground_truth).strip().lower()
 # ========================= 主评估器 =========================
 class GSM8KAccuracyEvaluator:
     def __init__(self, hf_token=None, max_samples=1000, project_path="."):
