@@ -3,6 +3,7 @@
 import torch
 import numpy as np
 import pandas as pd
+from huggingface_hub import login
 from transformers import AutoTokenizer, AutoModelForCausalLM
 import re
 import json
@@ -231,14 +232,47 @@ class SLMInterface(ModelInterface):
         except Exception as e: print(f"❌ Failed to load SLM: {e}"); raise
 
     def predict(self, question: str) -> str:
-        if self.model is None: self.load_model()
-        prompt = f"Question: {question}\nAnswer: Let me solve this step by step.\n"
+        if self.model is None:
+            self.load_model()
+
+        # --- 【【【UPGRADED PROMPT FOR SLM】】】---
+        # This prompt guides the model to reason step-by-step and format the final answer.
+        prompt = f"""Solve the following math problem. Think step by step and then write the final answer in the format #### <answer>.
+
+    Question: {question}
+    Answer: Let's think step by step.
+    """
+        # --- END NEW PROMPT ---
+
         inputs = self.tokenizer.encode(prompt, return_tensors="pt", max_length=1024, truncation=True)
-        if torch.cuda.is_available(): inputs = inputs.to(self.model.device)
+        if torch.cuda.is_available():
+            inputs = inputs.to(self.model.device)
+
         with torch.no_grad():
-            outputs = self.model.generate(inputs, max_new_tokens=200, num_return_sequences=1, do_sample=False, pad_token_id=self.tokenizer.eos_token_id)
+            outputs = self.model.generate(
+                inputs,
+                max_new_tokens=200,
+                num_return_sequences=1,
+                do_sample=False,
+                pad_token_id=self.tokenizer.eos_token_id
+            )
+
         full_response = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
-        return full_response[len(prompt):].strip()
+
+        # Adjust the slicing logic to match the new prompt
+        assistant_response_start = "Answer: Let's think step by step."
+        start_index = full_response.rfind(assistant_response_start)  # Use rfind for robustness
+        if start_index != -1:
+            answer = full_response[start_index + len(assistant_response_start):].strip()
+        else:  # Fallback if the prompt isn't found in the output
+            answer = full_response
+
+        return answer
+
+
+# ==========================================================
+# ===== 在 common_utils.py 中，用这个版本替换旧的 =====
+# ==========================================================
 
 class EnhancedLLMInterface(ModelInterface):
     def __init__(self, config: ModelConfig, hf_token: str = None):
@@ -246,44 +280,106 @@ class EnhancedLLMInterface(ModelInterface):
         self.hf_token = hf_token
 
     def setup_authentication(self):
-        if self.hf_token: login(token=self.hf_token)
-        elif os.getenv('HUGGINGFACE_TOKEN'): print("Found token in environment.")
-        else: print("⚠️ No HuggingFace token provided.")
+        # ... (此方法保持不变)
+        if self.hf_token:
+            login(token=self.hf_token)
+        elif os.getenv('HUGGINGFACE_TOKEN'):
+            print("Found token in environment.")
+        else:
+            print("⚠️ No HuggingFace token provided.")
 
     def load_model(self):
-        print(f"🔄 Loading LLM: {self.config.name}"); self.setup_authentication()
+        # ... (此方法保持不变)
+        print(f"🔄 Loading LLM: {self.config.name}");
+        self.setup_authentication()
         try:
             self.tokenizer = AutoTokenizer.from_pretrained(self.config.model_path, trust_remote_code=True)
-            self.model = AutoModelForCausalLM.from_pretrained(self.config.model_path, torch_dtype=torch.bfloat16, device_map="auto", trust_remote_code=True)
+            self.model = AutoModelForCausalLM.from_pretrained(self.config.model_path, torch_dtype=torch.bfloat16,
+                                                              device_map="auto", trust_remote_code=True)
             if self.tokenizer.pad_token is None: self.tokenizer.pad_token = self.tokenizer.eos_token
             print(f"✅ LLM loaded successfully on {next(self.model.parameters()).device}")
-        except Exception as e: print(f"❌ Failed to load LLM: {e}"); raise
+        except Exception as e:
+            print(f"❌ Failed to load LLM: {e}"); raise
 
     def predict(self, question: str) -> str:
-        if self.model is None: self.load_model()
-        prompt = f"<|begin_of_text|><|start_header_id|>user<|end_header_id|>\n\nSolve the following math problem step by step: {question}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n"
+        """
+        【【【已更新为包含优化版Prompt的版本】】】
+        """
+        if self.model is None:
+            self.load_model()
+
+        # --- 使用新的、更优化的“思维链”提示 ---
+        prompt = f"""<|begin_of_text|><|start_header_id|>user<|end_header_id|>
+Solve the following math problem step-by-step. At the end, provide the final numerical answer inside <|answer|> and <|end-of-answer|>.
+
+Question: {question}
+<|eot_id|><|start_header_id|>assistant<|end_header_id|>
+Let's think step by step.
+"""
+        # --- 新提示结束 ---
+
         inputs = self.tokenizer.encode(prompt, return_tensors="pt").to(next(self.model.parameters()).device)
         with torch.no_grad():
-            outputs = self.model.generate(inputs, max_new_tokens=300, num_return_sequences=1, do_sample=False, pad_token_id=self.tokenizer.eos_token_id)
+            outputs = self.model.generate(
+                inputs,
+                max_new_tokens=300,
+                num_return_sequences=1,
+                do_sample=False,
+                pad_token_id=self.tokenizer.eos_token_id
+            )
+
         full_response = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
-        return re.sub(r"(?s).*\<\|start_header_id\|\>assistant\<\|end_header_id\|\>\n", "", full_response, 1).strip()
+
+        # 调整答案切分逻辑以匹配新提示
+        assistant_response_start = "Let's think step by step."
+        start_index = full_response.rfind(assistant_response_start)  # 使用rfind确保从最后的assistant部分开始
+        if start_index != -1:
+            answer = full_response[start_index + len(assistant_response_start):].strip()
+        else:
+            # 如果找不到提示，使用正则表达式作为备用方案
+            answer = re.sub(r"(?s).*\<\|start_header_id\|\>assistant\<\|end_header_id\|\>\n", "", full_response,
+                            1).strip()
+
+        return answer
+
 
 class AccuracyValidator:
-    @staticmethod
     def extract_final_answer(response: str) -> str:
-        patterns = [r'[Tt]he final answer is .*?([+-]?[\d,]+(?:\.\d+)?)', r'####\s*([+-]?[\d,]+(?:\.\d+)?)', r'is\s*\$([+-]?[\d,]+(?:\.\d+)?)', r'is\s*([+-]?[\d,]+(?:\.\d+)?)']
+        """
+        【【【升级版答案提取器】】】
+        1. 优先匹配我们自定义的、最可靠的答案标签。
+        2. 其次匹配GSM8K的标准格式。
+        3. 增加更多常见句式的匹配。
+        4. 将提取最后一个数字作为最终的备用方案。
+        5. 自动处理数字中的逗号。
+        """
+        # 优先匹配我们为LLM设计的<|answer|>标签
+        match = re.search(r'<\|answer\|>(.*?)<\|end-of-answer\|>', response, re.DOTALL)
+        if match:
+            return match.group(1).strip().replace(',', '')
+
+        # 其次匹配GSM8K的标准####格式
+        match = re.search(r'####\s*([+-]?[\d,]+(?:\.\d+)?)', response)
+        if match:
+            return match.group(1).replace(',', '')
+
+        # 匹配 "the answer is X" 等常见句式
+        patterns = [
+            r'[Tt]he final answer is.*?([+-]?[\d,]+(?:\.\d+)?)',
+            r'[Tt]he answer is.*?([+-]?[\d,]+(?:\.\d+)?)',
+            r'is therefore.*?([+-]?[\d,]+(?:\.\d+)?)'
+        ]
         for pattern in patterns:
             match = re.search(pattern, response)
-            if match: return match.group(1).replace(',', '')
+            if match:
+                return match.group(1).strip().replace(',', '')
+
+        # 如果都没有，提取回答中的最后一个数字作为备用
         numbers = re.findall(r'([+-]?[\d,]+(?:\.\d+)?)', response)
-        return numbers[-1].replace(',', '') if numbers else "No answer found"
+        if numbers:
+            return numbers[-1].replace(',', '')
 
-    @staticmethod
-    def is_correct(predicted: str, ground_truth: str, tolerance: float = 1e-9) -> bool:
-        try:
-            return abs(float(predicted) - float(ground_truth)) <= tolerance
-        except (ValueError, TypeError): return str(predicted).strip().lower() == str(ground_truth).strip().lower()
-
+        return "No answer found"
 # ========================= 主评估器 =========================
 class GSM8KAccuracyEvaluator:
     def __init__(self, hf_token=None, max_samples=1000, project_path="."):
