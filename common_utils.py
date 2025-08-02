@@ -291,35 +291,20 @@ class EnhancedLLMInterface(ModelInterface):
             print("⚠️ No HuggingFace token provided.")
 
     def load_model(self):
-        print(f"🔄 Loading LLM: {self.config.name} with 4-bit quantization...")
+        print(f"🔄 Loading LLM: {self.config.name} in bfloat16...")
         self.setup_authentication()
-
         try:
-            # --- 新增：为70B模型定义4位量化配置 ---
-            bnb_config = BitsAndBytesConfig(
-                load_in_4bit=True,
-                bnb_4bit_quant_type="nf4",  # 使用NF4类型进行量化，效果好
-                bnb_4bit_compute_dtype=torch.bfloat16,  # 在计算时使用bfloat16以保持精度
-                bnb_4bit_use_double_quant=True,  # 使用双重量化以节省更多显存
-            )
-
-            self.tokenizer = AutoTokenizer.from_pretrained(
-                self.config.model_path,
-                trust_remote_code=True
-            )
-
+            # 移除所有和BitsAndBytesConfig相关的代码
+            self.tokenizer = AutoTokenizer.from_pretrained(self.config.model_path)
             self.model = AutoModelForCausalLM.from_pretrained(
                 self.config.model_path,
-                quantization_config=bnb_config,  # <--- 核心修改：应用量化配置
-                device_map="auto",  # 自动将模型加载到GPU
+                torch_dtype=torch.bfloat16,  # <--- 直接使用bfloat16全精度
+                device_map="auto",
                 trust_remote_code=True
             )
-
             if self.tokenizer.pad_token is None:
                 self.tokenizer.pad_token = self.tokenizer.eos_token
-
-            print(f"✅ LLM ({self.config.name}) loaded successfully in 4-bit on {next(self.model.parameters()).device}")
-
+            print(f"✅ LLM ({self.config.name}) loaded successfully on {next(self.model.parameters()).device}")
         except Exception as e:
             print(f"❌ Failed to load LLM: {e}")
             raise
@@ -424,19 +409,20 @@ class GSM8KAccuracyEvaluator:
         self.validator = AccuracyValidator()
         self.data_processor = FixedGSM8KProcessor(max_samples=max_samples)
         # 升级SLM为8B模型
+        # --- 【【【修改点 1：将SLM升级为8B模型】】】---
         self.slm_config = ModelConfig(
             name="Llama-3.1-8B-Instruct (New SLM)",
-            model_path="meta-llama/Llama-3.1-8B-Instruct",  # <--- 修改
-            cost_per_token=0.003,  # 成本相应调整
-            avg_latency_ms=300  # 延迟相应调整
+            model_path="meta-llama/Llama-3.1-8B-Instruct",
+            cost_per_token=0.003,
+            avg_latency_ms=300
         )
 
-        # 升级LLM为70B模型
+        # --- 【【【修改点 2：将LLM更换为Mixtral模型】】】---
         self.llm_config = ModelConfig(
-            name="Llama-3.1-70B-Instruct (New LLM)",
-            model_path="meta-llama/Llama-3.1-70B-Instruct",  # <--- 修改
-            cost_per_token=0.010,  # 成本相应调整
-            avg_latency_ms=1000  # 延迟相应调整
+            name="Mixtral-8x7B-Instruct (Sweet Spot LLM)",
+            model_path="mistralai/Mixtral-8x7B-Instruct-v0.1",
+            cost_per_token=0.008,
+            avg_latency_ms=1200
         )
         self.slm = SLMInterface(self.slm_config)
         self.llm = EnhancedLLMInterface(self.llm_config, hf_token)
