@@ -449,6 +449,17 @@ class GSM8KAccuracyEvaluator:
             self.router = LearnedAttentionRouter(model_path=router_model_path, device=device, threshold=0.5)
 
     def evaluate_model_on_problems(self, model_interface, problems, model_name, max_problems=None):
+        # --- 【【【新增的显存管理代码】】】---
+        # 如果即将评估的是LLM，并且SLM模型还加载在内存中
+        if "LLM" in model_name and self.slm.model is not None:
+            print("\n🧠 Detected LLM evaluation. Freeing up VRAM by deleting SLM model...")
+            # 删除SLM模型对象
+            del self.slm.model
+            self.slm.model = None
+            # 清理未被引用的CUDA缓存
+            torch.cuda.empty_cache()
+            print("✅ SLM model removed from VRAM. Ready to load the large LLM.")
+        # --- 代码结束 ---
         print(f"\n🔍 评估 {model_name}...")
         if max_problems and len(problems) > max_problems:
             problems = random.sample(problems, max_problems)
