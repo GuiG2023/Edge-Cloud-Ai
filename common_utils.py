@@ -434,8 +434,11 @@ class GSM8KAccuracyEvaluator:
             router_model_path = os.path.join(self.project_path, "router_model.pth")
             self.router = LearnedAttentionRouter(model_path=router_model_path, device=device, threshold=0.5)
 
-    # 在 common_utils.py 的 GSM8KAccuracyEvaluator 类中
+    # ========================================================================
+    # ===== 在 common_utils.py 中，使用这个【正确版本】的函数替换旧的 =====
+    # ========================================================================
 
+    # 在 GSM8KAccuracyEvaluator 类中
     def evaluate_model_on_problems(self, model_interface, problems: List[Dict],
                                    model_name: str, max_problems: Optional[int] = None) -> Dict:
         import time  # 导入时间库
@@ -460,25 +463,39 @@ class GSM8KAccuracyEvaluator:
         correct_count, total_count, detailed_results, error_cases = 0, len(problems), [], []
 
         for i, problem in enumerate(problems):
-            print(f"   ➡️  正在处理 {model_name} 的问题 #{i + 1}/{total_count}... @ {time.ctime()}")
+            # --- 【【【这是一个合并后的、正确的 try-except 结构】】】---
+            try:
+                # 打印开始处理的路标
+                print(f"   ➡️  正在处理 {model_name} 的问题 #{i + 1}/{total_count}... @ {time.ctime()}")
 
-            try:
+                # 【只调用一次】模型进行推理，这是最耗时的步骤
                 response = model_interface.predict(problem['question'])
+
+                # 推理完成后，打印结束路标
                 print(f"   ...问题 #{i + 1} 推理完成，正在验证。 @ {time.ctime()}")
-                # ... (后续逻辑不变)
-            try:
-                response = model_interface.predict(problem['question'])
+
+                # 继续进行答案提取和验证
                 predicted_answer = self.validator.extract_final_answer(response)
                 is_correct = self.validator.is_correct(predicted_answer, problem['answer'])
-                if is_correct: correct_count += 1
-                else: error_cases.append({'q': problem['question'][:100], 'gt': problem['answer'], 'pred': predicted_answer})
+
+                if is_correct:
+                    correct_count += 1
+                else:
+                    error_cases.append(
+                        {'q': problem['question'][:100], 'gt': problem['answer'], 'pred': predicted_answer})
+
                 detailed_results.append({'is_correct': is_correct})
+
             except Exception as e:
-                print(f"   ⚠️ 处理错误: {e}"); detailed_results.append({'is_correct': False})
-        print()
+                print(f"\n   ⚠️ 处理问题 #{i + 1} ('{problem['question'][:30]}...') 时发生错误: {e}")
+                detailed_results.append({'is_correct': False})
+                continue  # 确保即使出错也能继续处理下一个问题
+
+        print()  # 换行
         accuracy = correct_count / total_count if total_count > 0 else 0
         print(f"✅ {model_name} 准确率: {accuracy:.2%} ({correct_count}/{total_count})")
-        return {'accuracy': accuracy, 'correct_count': correct_count, 'total_count': total_count, 'detailed_results': detailed_results}
+        return {'accuracy': accuracy, 'correct_count': correct_count, 'total_count': total_count,
+                'detailed_results': detailed_results}
 
     def evaluate_routing_accuracy(self, simple_problems, complex_problems):
         print("\n🧭 评估路由准确性...")
