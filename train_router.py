@@ -11,81 +11,110 @@ from common_utils import GSM8KAccuracyEvaluator, device, LearnedAttentionRouter,
 # ===== 在 train_router.py 文件中，使用这个新版本的函数来替换旧的 =====
 # ========================================================================
 
+# ========================================================================
+# ===== 在 train_router.py 文件中，使用这个【带实时计数】的版本 =====
+# ========================================================================
+
 def generate_router_training_data(evaluator, output_file):
     """
     生成用于训练路由器的数据集。
-    【【【健壮版：支持实时保存和断点续传】】】
+    【【【健壮版：支持实时保存、断点续传和实时计数】】】
     """
+    import time
+
     print("\n" + "=" * 50 + "\n🧠 Generating router training data (Resumable Mode)...\n" + "=" * 50)
 
-    # --- 新增：断点续传逻辑 ---
     processed_samples = set()
     processed_count = 0
-    # 检查输出文件是否已存在，如果存在，则读取已处理过的问题
+    # --- 【【【新增】】】初始化简单/复杂计数器 ---
+    simple_label_count = 0
+    complex_label_count = 0
+    # ------------------------------------
+
     if os.path.exists(output_file):
         with open(output_file, 'r', encoding='utf-8') as f:
             for line in f:
                 try:
                     data = json.loads(line)
-                    # 假设每个question是唯一的标识符
                     if 'question' in data:
                         processed_samples.add(data['question'])
+                        # --- 【【【新增】】】从已有文件中恢复计数 ---
+                        if data.get('label') == 0.0:
+                            simple_label_count += 1
+                        else:
+                            complex_label_count += 1
+                        # ------------------------------------
                 except:
                     continue
         processed_count = len(processed_samples)
         print(f"🔄 Found existing data file with {processed_count} samples. Resuming...")
+        print(f"   Initial counts: Simple Labels = {simple_label_count}, Complex Labels = {complex_label_count}")
 
-    # 确保SLM已加载
     evaluator._ensure_slm_loaded()
     slm_interface = evaluator.slm
     all_problems = evaluator.data_processor.samples
-    print(f"📊 Total problems to process: {len(all_problems)}. Already processed: {processed_count}.")
+    total_to_process = len(all_problems)
+    print(f"📊 Total problems to process: {total_to_process}. Already processed: {processed_count}.")
 
-    # --- 修改：以追加模式('a')打开文件 ---
+    start_time = time.time()  # 记录开始时间
+
     with open(output_file, 'a', encoding='utf-8') as f:
-        # 使用临时的、未训练的路由器实例来提取特征
         temp_feature_extractor = LearnedAttentionRouter("dummy_path.pth", device)
         validator = AccuracyValidator()
 
         for i, problem in enumerate(all_problems):
-            # --- 新增：跳过已处理的样本 ---
             if problem['question'] in processed_samples:
                 continue
 
-            # 打印进度
             current_progress = processed_count + 1
-            print(f"   Progress: {current_progress}/{len(all_problems)}", end="\r")
 
             try:
-                # 核心逻辑与之前相同
                 slm_response = slm_interface.predict(problem['question'])
                 slm_answer = validator.extract_final_answer(slm_response)
                 gt_answer = evaluator.data_processor.extract_answer(problem['answer'])
                 is_slm_correct = validator.is_correct(slm_answer, gt_answer)
 
                 label = 1.0 if not is_slm_correct else 0.0
+
+                # --- 【【【新增】】】更新计数器 ---
+                if label == 0.0:
+                    simple_label_count += 1
+                else:
+                    complex_label_count += 1
+                # --------------------------------
+
                 features = temp_feature_extractor.extract_core_features(
                     problem['question'], slm_interface.model, slm_interface.tokenizer
                 )
 
-                sample_to_save = {
-                    "question": problem['question'],  # 新增question用于去重
-                    "features": features,
-                    "label": label
-                }
+                sample_to_save = {"question": problem['question'], "features": features, "label": label}
 
-                # --- 修改：处理完一个就立刻写入文件 ---
                 f.write(json.dumps(sample_to_save) + '\n')
-                f.flush()  # 确保内容立即写入磁盘
+                f.flush()
                 processed_count += 1
                 processed_samples.add(problem['question'])
 
+                # --- 【【【核心修改：增加详细进度报告】】】---
+                # 每处理20个样本，或者在第一个和最后一个时，打印一次清晰的进度
+                if current_progress % 20 == 0 or current_progress == 1 or current_progress == total_to_process:
+                    elapsed_time = time.time() - start_time
+                    samples_per_second = (
+                                                     current_progress - processed_count + simple_label_count + complex_label_count) / elapsed_time if elapsed_time > 0 else 0
+                    print(f"\n--- Progress Update ---")
+                    print(f"   Processed: {current_progress}/{total_to_process}")
+                    print(
+                        f"   Label Counts: Simple (Correct) = {simple_label_count}, Complex (Incorrect) = {complex_label_count}")
+                    print(f"   Speed: {samples_per_second:.2f} samples/sec")
+                    print(f"-----------------------")
+                # --- 进度报告结束 ---
+
+
             except Exception as e:
-                # 打印更详细的错误
                 print(f"\n   ⚠️ Skipped problem #{i} ('{problem['question'][:30]}...') due to error: {e}")
                 continue
 
     print(f"\n✅ Training data generation complete! Total {processed_count} samples saved to {output_file}")
+    print(f"   Final Label Distribution: Simple = {simple_label_count}, Complex = {complex_label_count}")
 class RouterDataset(Dataset):
     def __init__(self, data_path):
         self.samples = []
@@ -144,7 +173,7 @@ if __name__ == "__main__":
     PROJECT_PATH = os.getenv('PROJECT_PATH_GDRIVE', '.')
     hf_token = os.getenv('HUGGINGFACE_TOKEN')
 
-    evaluator = GSM8KAccuracyEvaluator(hf_token=hf_token, max_samples=200, project_path=PROJECT_PATH)
+    evaluator = GSM8KAccuracyEvaluator(hf_token=hf_token, max_samples=2000, project_path=PROJECT_PATH)
 
     training_file = os.path.join(PROJECT_PATH, "router_training_data.jsonl")
     model_file = os.path.join(PROJECT_PATH, "router_model.pth")
