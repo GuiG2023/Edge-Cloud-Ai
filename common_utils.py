@@ -439,21 +439,15 @@ class GSM8KAccuracyEvaluator:
     # ========================================================================
 
     # 在 GSM8KAccuracyEvaluator 类中
+    # 在 common_utils.py 的 GSM8KAccuracyEvaluator 类中
+
     def evaluate_model_on_problems(self, model_interface, problems: List[Dict],
                                    model_name: str, max_problems: Optional[int] = None) -> Dict:
-        import time  # 导入时间库
-
-        # --- 显存清理代码 (保持不变) ---
-        if "LLM" in model_name and self.slm.model is not None:
-            print(f"\n🧠 [路标] 检测到LLM评估，准备清理SLM... @ {time.ctime()}")
-            del self.slm.model
-            self.slm.model = None
-            torch.cuda.empty_cache()
-            print(f"✅ [路标] SLM已从显存移除。 @ {time.ctime()}")
+        import time
 
         print(f"\n🔍 开始评估 {model_name}... @ {time.ctime()}")
 
-        # --- 模型加载现在会在这里被触发 ---
+        # 模型加载现在会自动触发
         if model_interface.model is None:
             model_interface.load_model()
 
@@ -463,18 +457,11 @@ class GSM8KAccuracyEvaluator:
         correct_count, total_count, detailed_results, error_cases = 0, len(problems), [], []
 
         for i, problem in enumerate(problems):
-            # --- 【【【这是一个合并后的、正确的 try-except 结构】】】---
+            print(f"   ➡️  正在处理 {model_name} 的问题 #{i + 1}/{total_count}... @ {time.ctime()}")
             try:
-                # 打印开始处理的路标
-                print(f"   ➡️  正在处理 {model_name} 的问题 #{i + 1}/{total_count}... @ {time.ctime()}")
-
-                # 【只调用一次】模型进行推理，这是最耗时的步骤
                 response = model_interface.predict(problem['question'])
-
-                # 推理完成后，打印结束路标
                 print(f"   ...问题 #{i + 1} 推理完成，正在验证。 @ {time.ctime()}")
 
-                # 继续进行答案提取和验证
                 predicted_answer = self.validator.extract_final_answer(response)
                 is_correct = self.validator.is_correct(predicted_answer, problem['answer'])
 
@@ -485,11 +472,10 @@ class GSM8KAccuracyEvaluator:
                         {'q': problem['question'][:100], 'gt': problem['answer'], 'pred': predicted_answer})
 
                 detailed_results.append({'is_correct': is_correct})
-
             except Exception as e:
                 print(f"\n   ⚠️ 处理问题 #{i + 1} ('{problem['question'][:30]}...') 时发生错误: {e}")
                 detailed_results.append({'is_correct': False})
-                continue  # 确保即使出错也能继续处理下一个问题
+                continue
 
         print()  # 换行
         accuracy = correct_count / total_count if total_count > 0 else 0
@@ -510,17 +496,54 @@ class GSM8KAccuracyEvaluator:
         print(f"✅ 路由准确率: {accuracy:.2%} ({correct_routes}/{total_routes})")
         return {'routing_accuracy': accuracy, 'correct_routes': correct_routes, 'total_routes': total_routes}
 
-    def run_gsm8k_evaluation(self, n_samples=200, simple_ratio=0.5):
-        print("="*60 + "\n🚀 开始评估\n" + "="*60)
-        simple, complex = self.data_processor.get_balanced_sample(n_total=n_samples, simple_ratio=simple_ratio)
-        slm_simple = self.evaluate_model_on_problems(self.slm, simple, "SLM on Simple")
-        llm_complex = self.evaluate_model_on_problems(self.llm, complex, "LLM on Complex")
-        slm_complex = self.evaluate_model_on_problems(self.slm, complex, "SLM on Complex (X-Eval)", max_problems=50)
-        llm_simple = self.evaluate_model_on_problems(self.llm, simple, "LLM on Simple (X-Eval)", max_problems=50)
-        routing = self.evaluate_routing_accuracy(simple, complex)
-        smart_routing = self._calculate_smart_routing_performance(slm_simple, llm_complex, routing)
-        self._generate_final_report(slm_simple, llm_complex, slm_complex, llm_simple, routing, smart_routing, n_samples)
+    # 在 common_utils.py 的 GSM8KAccuracyEvaluator 类中
 
+    def run_gsm8k_evaluation(self, n_samples=200, simple_ratio=0.5):
+        import torch
+        import time
+
+        print("=" * 60 + "\n🚀 开始优化版评估流程\n" + "=" * 60)
+        print(f"📊 准备GSM8K数据 (样本数: {n_samples})...")
+        simple_problems, complex_problems = self.data_processor.get_balanced_sample(n_total=n_samples,
+                                                                                    simple_ratio=simple_ratio)
+
+        if not simple_problems and not complex_problems:
+            print("❌ 错误：没有采样到任何数据。")
+            return None
+
+        # --- 阶段一：执行所有SLM相关测试 ---
+        print(f"\n--- [阶段一] 开始执行所有SLM相关测试 --- @ {time.ctime()}")
+        slm_simple_results = self.evaluate_model_on_problems(self.slm, simple_problems, "SLM on Simple")
+        slm_complex_results = self.evaluate_model_on_problems(self.slm, complex_problems, "SLM on Complex (X-Eval)")
+
+        # 评估路由器也需要SLM，所以在这里一并完成
+        routing_results = self.evaluate_routing_accuracy(simple_problems, complex_problems)
+
+        # --- 中场：清理SLM，为LLM腾出空间 ---
+        print(f"\n--- [中场休息] 清理SLM显存，为LLM做准备 --- @ {time.ctime()}")
+        if self.slm.model is not None:
+            del self.slm.model
+            self.slm.model = None
+            torch.cuda.empty_cache()
+            print("✅ SLM已从显存移除。")
+
+        # --- 阶段二：执行所有LLM相关测试 ---
+        print(f"\n--- [阶段二] 开始执行所有LLM相关测试 --- @ {time.ctime()}")
+        llm_complex_results = self.evaluate_model_on_problems(self.llm, complex_problems, "LLM on Complex")
+        llm_simple_results = self.evaluate_model_on_problems(self.llm, simple_problems, "LLM on Simple (X-Eval)")
+
+        # --- 生成报告 ---
+        print("\n--- [评估完成] 所有测试已结束，正在生成报告 ---")
+        smart_routing_results = self._calculate_smart_routing_performance(slm_simple_results, llm_complex_results,
+                                                                          routing_results)
+        self._generate_final_report(slm_simple_results, llm_complex_results, slm_complex_results, llm_simple_results,
+                                    routing_results, smart_routing_results, n_samples)
+
+        return {
+            'slm_simple': slm_simple_results,
+            'llm_complex': llm_complex_results,
+            'routing': routing_results
+        }
     def _calculate_smart_routing_performance(self, slm_res, llm_res, rout_res):
         rout_acc, slm_acc, llm_acc = rout_res['routing_accuracy'], slm_res['accuracy'], llm_res['accuracy']
         simple_ratio = slm_res['total_count'] / max(1, slm_res['total_count'] + llm_res['total_count'])
