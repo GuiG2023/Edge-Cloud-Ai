@@ -434,24 +434,38 @@ class GSM8KAccuracyEvaluator:
             router_model_path = os.path.join(self.project_path, "router_model.pth")
             self.router = LearnedAttentionRouter(model_path=router_model_path, device=device, threshold=0.5)
 
-    def evaluate_model_on_problems(self, model_interface, problems, model_name, max_problems=None):
-        # --- 【【【新增的显存管理代码】】】---
-        # 如果即将评估的是LLM，并且SLM模型还加载在内存中
+    # 在 common_utils.py 的 GSM8KAccuracyEvaluator 类中
+
+    def evaluate_model_on_problems(self, model_interface, problems: List[Dict],
+                                   model_name: str, max_problems: Optional[int] = None) -> Dict:
+        import time  # 导入时间库
+
+        # --- 显存清理代码 (保持不变) ---
         if "LLM" in model_name and self.slm.model is not None:
-            print("\n🧠 Detected LLM evaluation. Freeing up VRAM by deleting SLM model...")
-            # 删除SLM模型对象
+            print(f"\n🧠 [路标] 检测到LLM评估，准备清理SLM... @ {time.ctime()}")
             del self.slm.model
             self.slm.model = None
-            # 清理未被引用的CUDA缓存
             torch.cuda.empty_cache()
-            print("✅ SLM model removed from VRAM. Ready to load the large LLM.")
-        # --- 代码结束 ---
-        print(f"\n🔍 评估 {model_name}...")
+            print(f"✅ [路标] SLM已从显存移除。 @ {time.ctime()}")
+
+        print(f"\n🔍 开始评估 {model_name}... @ {time.ctime()}")
+
+        # --- 模型加载现在会在这里被触发 ---
+        if model_interface.model is None:
+            model_interface.load_model()
+
         if max_problems and len(problems) > max_problems:
             problems = random.sample(problems, max_problems)
+
         correct_count, total_count, detailed_results, error_cases = 0, len(problems), [], []
+
         for i, problem in enumerate(problems):
-            print(f"   处理问题 {i + 1}/{total_count}...", end="\r")
+            print(f"   ➡️  正在处理 {model_name} 的问题 #{i + 1}/{total_count}... @ {time.ctime()}")
+
+            try:
+                response = model_interface.predict(problem['question'])
+                print(f"   ...问题 #{i + 1} 推理完成，正在验证。 @ {time.ctime()}")
+                # ... (后续逻辑不变)
             try:
                 response = model_interface.predict(problem['question'])
                 predicted_answer = self.validator.extract_final_answer(response)
