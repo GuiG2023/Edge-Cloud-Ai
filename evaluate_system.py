@@ -26,6 +26,6 @@ if __name__ == "__main__":
         # 【【【核心修改：将样本量缩减到最小】】】
         # 我们只用4个样本（2个简单，2个复杂）来快速跑通全流程
         print(f"\n--- [诊断] 即将以 n_samples=4 的超小规模运行评估... --- @ {time.ctime()}")
-        evaluator.run_gsm8k_evaluation(n_samples=50, simple_ratio=0.5)
+        evaluator.run_gsm8k_evaluation(n_samples=50, simple_ratio=0.6)
 
         print(f"\n--- [诊断模式结束] --- @ {time.ctime()}")
