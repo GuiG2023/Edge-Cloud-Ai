@@ -119,15 +119,16 @@ class FixedGSM8KProcessor:
         return sampled_simple, sampled_complex
 
 # ========================= 可训练的复杂度预测网络 =========================
-class ComplexityPredictorNet(nn.Module):
-    """一个简单的神经网络，用于从注意力特征中学习并预测任务复杂度。"""
-    def __init__(self, input_features: int = 8):
-        super().__init__()
-        self.network = nn.Sequential(
-            nn.Linear(input_features, 64), nn.ReLU(), nn.Dropout(0.3),
-            nn.Linear(64, 32), nn.ReLU(),
-            nn.Linear(32, 1)
-        )
+    # 在 common_utils.py 中
+    class ComplexityPredictorNet(nn.Module):
+        def __init__(self, input_features: int = 18):  # <--- 从8修改为18
+            super().__init__()
+            self.network = nn.Sequential(
+                nn.Linear(input_features, 128),  # <--- 变宽
+                nn.ReLU(), nn.Dropout(0.3),
+                nn.Linear(128, 64), nn.ReLU(),
+                nn.Linear(64, 1)
+            )
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.network(x)
 
@@ -170,57 +171,48 @@ class LearnedAttentionRouter:
             probability = torch.sigmoid(logit).item()
         return {'complexity_score': probability, 'is_complex': probability > self.threshold}
 
+    # 在 LearnedAttentionRouter 类中
     def extract_core_features(self, text: str, model, tokenizer) -> dict:
+        """【【【升级版：提取分层特征】】】"""
         model_device = next(model.parameters()).device
         inputs = tokenizer(text, return_tensors="pt", max_length=200, truncation=True, padding=True)
         inputs = {k: v.to(model_device) for k, v in inputs.items()}
         with torch.no_grad():
             outputs = model(**inputs, output_attentions=True)
-        attentions = outputs.attentions[-1][0].cpu()
+        all_layer_attentions = outputs.attentions
         seq_len = inputs['attention_mask'].sum().item()
-        entropy_features = self._compute_entropy(attentions, seq_len)
-        variance_features = self._compute_variance(attentions, seq_len)
-        concentration_features = self._compute_concentration(attentions, seq_len)
-        return {**entropy_features, **variance_features, **concentration_features}
+        num_layers = len(all_layer_attentions)
+        mid_layer_index, last_layer_index = num_layers // 2, -1
+        mid_layer_metrics = self._calculate_metrics_for_layer(all_layer_attentions[mid_layer_index][0], seq_len)
+        last_layer_metrics = self._calculate_metrics_for_layer(all_layer_attentions[last_layer_index][0], seq_len)
+        final_features = {}
+        for key, value in mid_layer_metrics.items(): final_features[f"mid_{key}"] = value
+        for key, value in last_layer_metrics.items(): final_features[f"last_{key}"] = value
+        final_features['entropy_diff'] = last_layer_metrics['avg_entropy'] - mid_layer_metrics['avg_entropy']
+        final_features['variance_diff'] = last_layer_metrics['avg_variance'] - mid_layer_metrics['avg_variance']
+        return final_features
 
-    def _compute_entropy(self, attentions, seq_len):
-        """
-        【【【数值稳定版】】】的熵计算函数
-        """
-        all_entropies = []
-        for head in range(attentions.shape[0]):
+    # 在 LearnedAttentionRouter 类中
+    def _calculate_metrics_for_layer(self, attentions_for_layer: torch.Tensor, seq_len: int) -> dict:
+        """一个辅助函数，为单层的注意力权重计算所有指标"""
+        attentions_for_layer = attentions_for_layer.cpu()
+        all_entropies, all_variances, all_max_attentions = [], [], []
+        for head in range(attentions_for_layer.shape[0]):
             for pos in range(seq_len):
-                # 选取当前位置有效的注意力分布
-                attn_dist = attentions[head, pos, :seq_len]
-
-                # --- 核心修复开始 ---
-                # 1. 为防止除以0，在分母上增加一个极小值epsilon
-                #    这一步确保attn_dist是一个合法的概率分布（总和为1）
+                attn_dist = attentions_for_layer[head, pos, :seq_len]
                 attn_dist_normalized = attn_dist / (torch.sum(attn_dist) + 1e-9)
-
-                # 2. 在取对数前，也增加一个极小值epsilon，防止log(0)导致NaN
                 entropy = -torch.sum(attn_dist_normalized * torch.log(attn_dist_normalized + 1e-9)).item()
-                # --- 核心修复结束 ---
-
                 all_entropies.append(entropy)
-
-        # 作为最后的保险，检查最终列表中是否仍有NaN值
+                all_variances.append(torch.var(attn_dist).item())
+                all_max_attentions.append(torch.max(attn_dist).item())
         valid_entropies = [e for e in all_entropies if not np.isnan(e)]
-        if not valid_entropies:
-            # 如果因未知原因所有计算都失败了，返回默认的0值
-            return {'avg_entropy': 0.0, 'entropy_std': 0.0, 'max_entropy': 0.0}
-
+        if not valid_entropies: valid_entropies = [0.0]
         return {
-            'avg_entropy': np.mean(valid_entropies),
-            'entropy_std': np.std(valid_entropies),
-            'max_entropy': np.max(valid_entropies)
+            'avg_entropy': np.mean(valid_entropies), 'entropy_std': np.std(valid_entropies),
+            'max_entropy': np.max(valid_entropies), 'avg_variance': np.mean(all_variances),
+            'variance_std': np.std(all_variances), 'max_variance': np.max(all_variances),
+            'avg_max_attention': np.mean(all_max_attentions), 'concentration_std': np.std(all_max_attentions)
         }
-    def _compute_variance(self, attentions, seq_len):
-        variances = [torch.var(attentions[h, p, :seq_len]).item() for h in range(attentions.shape[0]) for p in range(seq_len)]
-        return {'avg_variance': np.mean(variances), 'variance_std': np.std(variances), 'max_variance': np.max(variances)}
-    def _compute_concentration(self, attentions, seq_len):
-        max_attentions = [torch.max(attentions[h, p, :seq_len]).item() for h in range(attentions.shape[0]) for p in range(seq_len)]
-        return {'avg_max_attention': np.mean(max_attentions), 'concentration_std': np.std(max_attentions)}
 
 # ========================= SLM/LLM接口 和 准确率验证器 =========================
 class SLMInterface(ModelInterface):

@@ -115,19 +115,21 @@ def generate_router_training_data(evaluator, output_file):
 
     print(f"\n✅ Training data generation complete! Total {processed_count} samples saved to {output_file}")
     print(f"   Final Label Distribution: Simple = {simple_label_count}, Complex = {complex_label_count}")
+# 在 train_router.py 中
 class RouterDataset(Dataset):
     def __init__(self, data_path):
         self.samples = []
+        self.feature_keys = [
+            'mid_avg_entropy', 'mid_entropy_std', 'mid_max_entropy', 'mid_avg_variance',
+            'mid_variance_std', 'mid_max_variance', 'mid_avg_max_attention', 'mid_concentration_std',
+            'last_avg_entropy', 'last_entropy_std', 'last_max_entropy', 'last_avg_variance',
+            'last_variance_std', 'last_max_variance', 'last_avg_max_attention', 'last_concentration_std',
+            'entropy_diff', 'variance_diff'
+        ]
         with open(data_path, 'r', encoding='utf-8') as f:
             for line in f:
                 sample = json.loads(line)
-                feature_vector = [
-                    sample['features']['avg_entropy'], sample['features']['entropy_std'],
-                    sample['features']['max_entropy'],
-                    sample['features']['avg_variance'], sample['features']['variance_std'],
-                    sample['features']['max_variance'],
-                    sample['features']['avg_max_attention'], sample['features']['concentration_std']
-                ]
+                feature_vector = [sample['features'].get(key, 0.0) for key in self.feature_keys]
                 self.samples.append({
                     "features": torch.tensor(feature_vector, dtype=torch.float32),
                     "label": torch.tensor([sample['label']], dtype=torch.float32)
@@ -173,7 +175,7 @@ if __name__ == "__main__":
     PROJECT_PATH = os.getenv('PROJECT_PATH_GDRIVE', '.')
     hf_token = os.getenv('HUGGINGFACE_TOKEN')
 
-    evaluator = GSM8KAccuracyEvaluator(hf_token=hf_token, max_samples=2000, project_path=PROJECT_PATH)
+    evaluator = GSM8KAccuracyEvaluator(hf_token=hf_token, max_samples=100, project_path=PROJECT_PATH)
 
     training_file = os.path.join(PROJECT_PATH, "router_training_data.jsonl")
     model_file = os.path.join(PROJECT_PATH, "router_model.pth")
