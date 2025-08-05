@@ -12,6 +12,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from scipy import stats
+from torch import nn
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from huggingface_hub import login
 import re
@@ -230,7 +231,7 @@ class LearnedAttentionRouter:
 
         # 加载我们训练好的复杂度预测网络
         print(f"🧠 Loading learned complexity predictor from: {model_path}")
-        self.predictor_net = ComplexityPredictorNet(input_features=8).to(self.device)
+        self.predictor_net = ComplexityPredictorNet().to(self.device)
         try:
             self.predictor_net.load_state_dict(torch.load(model_path, map_location=self.device))
             self.predictor_net.eval()  # 切换到评估模式
@@ -609,7 +610,7 @@ def train_router(training_data_path="router_training_data.jsonl", epochs=20, lr=
         for line in f: training_data.append(json.loads(line))
     dataset = RouterDataset(training_data)
     dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
-    model = ComplexityPredictorNet(input_features=8).to(device)
+    model = ComplexityPredictorNet().to(device)
     criterion = nn.BCEWithLogitsLoss()
     optimizer = optim.Adam(model.parameters(), lr=lr)
     for epoch in range(epochs):

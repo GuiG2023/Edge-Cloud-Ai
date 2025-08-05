@@ -142,7 +142,7 @@ class LearnedAttentionRouter:
         self.threshold = threshold
         self.model_path = model_path
         print(f"🧠 Initializing LearnedAttentionRouter...")
-        self.predictor_net = ComplexityPredictorNet(input_features=8).to(self.device)
+        self.predictor_net = ComplexityPredictorNet().to(self.device)
         if os.path.exists(self.model_path):
             print(f"   Loading learned predictor from: {self.model_path}")
             self.predictor_net.load_state_dict(torch.load(self.model_path, map_location=self.device))

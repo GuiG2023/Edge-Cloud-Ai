@@ -145,7 +145,7 @@ def train_router(training_data_path, model_save_path, epochs=20, lr=1e-4, batch_
     print("\n" + "=" * 50 + "\n🚀 Training the smart router...\n" + "=" * 50)
     dataset = RouterDataset(training_data_path)
     dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
-    model = ComplexityPredictorNet(input_features=8).to(device)
+    model = ComplexityPredictorNet().to(device)
     criterion = nn.BCEWithLogitsLoss()
     optimizer = optim.Adam(model.parameters(), lr=lr)
 
