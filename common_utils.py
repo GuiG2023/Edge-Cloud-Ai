@@ -120,13 +120,15 @@ class FixedGSM8KProcessor:
 
 # ========================= 可训练的复杂度预测网络 =========================
     # 在 common_utils.py 中
-    class ComplexityPredictorNet(nn.Module):
-        def __init__(self, input_features: int = 18):  # <--- 从8修改为18
+class ComplexityPredictorNet(nn.Module):
+    def __init__(self, input_features: int = 18):  # <--- 从8修改为18
             super().__init__()
             self.network = nn.Sequential(
                 nn.Linear(input_features, 128),  # <--- 变宽
-                nn.ReLU(), nn.Dropout(0.3),
-                nn.Linear(128, 64), nn.ReLU(),
+                nn.ReLU(),
+                nn.Dropout(0.3),
+                nn.Linear(128, 64),
+                nn.ReLU(),
                 nn.Linear(64, 1)
             )
     def forward(self, x: torch.Tensor) -> torch.Tensor:
