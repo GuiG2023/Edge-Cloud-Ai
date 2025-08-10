@@ -4,7 +4,8 @@ import torch
 from torch import nn
 import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
-from common_utils import GSM8KAccuracyEvaluator, device, LearnedAttentionRouter, AccuracyValidator
+from common_utils import GSM8KAccuracyEvaluator, device, LearnedAttentionRouter, AccuracyValidator, \
+    ComplexityPredictorNet
 
 
 # ========================================================================
@@ -171,57 +172,126 @@ def train_router(training_data_path, model_save_path, epochs=20, lr=1e-4, batch_
     print(f"\n✅ Training complete! Model saved to {model_save_path}")
 
 
+# train_router.py (最终修正版)
+
+# ==========================================================
+# ===== 修改点 1: RouterDataset 现在接收 feature_subset =====
+# ==========================================================
+class RouterDataset(Dataset):
+    def __init__(self, data_path, feature_subset: list):
+        self.samples = []
+        self.feature_keys = feature_subset  # 直接使用传入的特征列表
+
+        print(f"--- Dataset Initialized using {len(self.feature_keys)} features: {self.feature_keys} ---")
+
+        with open(data_path, 'r', encoding='utf-8') as f:
+            for line in f:
+                try:
+                    sample = json.loads(line)
+                    # 严格按照传入的feature_keys顺序和数量构建特征向量
+                    feature_vector = [sample['features'].get(key, 0.0) for key in self.feature_keys]
+                    self.samples.append({
+                        "features": torch.tensor(feature_vector, dtype=torch.float32),
+                        "label": torch.tensor([sample['label']], dtype=torch.float32)
+                    })
+                except (json.JSONDecodeError, KeyError) as e:
+                    print(f"Warning: Skipping a malformed line in dataset. Error: {e}")
+                    continue
+
+    def __len__(self):
+        return len(self.samples)
+
+    def __getitem__(self, idx):
+        return self.samples[idx]
+
+
+# ==============================================================
+# ===== 修改点 2: train_router 现在也接收 feature_subset =====
+# ==============================================================
+def train_router(training_data_path, model_save_path, feature_subset: list, epochs=20, lr=1e-4, batch_size=32):
+    print("\n" + "=" * 50 + f"\n🚀 Training the smart router with {len(feature_subset)} features...\n" + "=" * 50)
+
+    # 1. 使用传入的特征子集来创建数据集
+    dataset = RouterDataset(training_data_path, feature_subset=feature_subset)
+    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
+
+    # 2. 【关键】根据特征子集的数量，动态创建模型
+    num_features = len(feature_subset)
+    model = ComplexityPredictorNet(input_features=num_features).to(device)
+
+    criterion = nn.BCEWithLogitsLoss()
+    optimizer = optim.Adam(model.parameters(), lr=lr)
+
+    # 3. 训练循环 (保持不变)
+    for epoch in range(epochs):
+        model.train()
+        total_loss, correct_preds, total_samples = 0, 0, 0
+        for batch in dataloader:
+            features, labels = batch['features'].to(device), batch['label'].to(device)
+            optimizer.zero_grad()
+            outputs = model(features)
+            loss = criterion(outputs, labels)
+            loss.backward()
+            optimizer.step()
+            total_loss += loss.item()
+            preds = torch.sigmoid(outputs) > 0.5
+            correct_preds += (preds == labels.bool()).sum().item()
+            total_samples += labels.size(0)
+
+        avg_loss = total_loss / len(dataloader)
+        accuracy = correct_preds / total_samples
+        print(f"Epoch {epoch + 1:02d}/{epochs} | Loss: {avg_loss:.4f} | Accuracy: {accuracy:.2%}")
+
+    torch.save(model.state_dict(), model_save_path)
+    print(f"\n✅ Training complete! Model saved to {model_save_path}")
+
+
 if __name__ == "__main__":
+    # 从环境变量中读取 Colab 传递过来的信息
     PROJECT_PATH = os.getenv('PROJECT_PATH_GDRIVE', '.')
     hf_token = os.getenv('HUGGINGFACE_TOKEN')
 
-    # evaluator = GSM8KAccuracyEvaluator(hf_token=hf_token, max_samples=100, project_path=PROJECT_PATH)
-    #
-    # training_file = os.path.join(PROJECT_PATH, "router_training_data.jsonl")
-    # model_file = os.path.join(PROJECT_PATH, "router_model.pth")
-    #
-    # generate_router_training_data(evaluator, output_file=training_file)
-    # train_router(training_data_path=training_file, model_save_path=model_file)
+    training_file = os.path.join(PROJECT_PATH, "router_training_data_rich_features.jsonl")
 
-    training_file = os.path.join(PROJECT_PATH, "router_training_data.jsonl")
-
-    # 目前特征重要性排名 (从高到低)
-    all_18_features_ranked = [
-        'last_avg_max_attention', 'last_max_entropy', 'last_concentration_std', 'variance_diff',
-        'mid_max_entropy', 'last_entropy_std', 'mid_entropy_std', 'mid_variance_std',
-        'mid_concentration_std', 'last_avg_variance', 'last_avg_entropy', 'mid_avg_max_attention',
-        'mid_avg_entropy', 'mid_max_variance', 'last_max_variance', 'entropy_diff',
-        'last_variance_std', 'mid_avg_variance'
-    ]
-
-    # --- 【【【实验选择区】】】---
-    # 一次只取消注释一个实验，运行完成后，再注释掉，换下一个。
-
-    # --- 实验1：只使用最重要的前5个特征 ---
-    print("\n--- 正在运行实验1：Top 5 特征 ---")
-    selected_features = all_18_features_ranked[:5]
-    model_save_path = os.path.join(PROJECT_PATH, "router_model_top5.pth")
-    # -----------------------------------
-
-    # # --- 实验2：只使用最重要的前10个特征 ---
-    # print("\n--- 正在运行实验2：Top 10 特征 ---")
-    # selected_features = all_18_features_ranked[:10]
-    # model_save_path = os.path.join(PROJECT_PATH, "router_model_top10.pth")
-    # # ------------------------------------
-
-    # # --- 实验3：使用全部18个特征 (作为对比基准) ---
-    # print("\n--- 正在运行实验3：全部 18 个特征 ---")
-    # selected_features = all_18_features_ranked
-    # model_save_path = os.path.join(PROJECT_PATH, "router_model_all.pth")
-    # # ------------------------------------
-
-    # --- 执行选定的实验 ---
-    # 确保数据已生成
+    # 首先，确保富特征数据集存在
     if not os.path.exists(training_file):
-        print("❌ 错误：训练数据文件未找到，请先运行完整的数据生成流程。")
+        print(f"❌ 错误: 富特征数据文件 '{training_file}' 未找到!")
+        print("   请先运行完整的数据生成流程来创建这个文件。")
+        # 您可以在这里添加调用 generate_router_training_data 的逻辑
     else:
-        # 您还需要稍微修改 train_router 和 RouterDataset 的定义，让它们能接收 feature_subset
-        # 这里假设您已经修改完毕
+        # 您的特征重要性排名 (从高到低)
+        all_18_features_ranked = [
+            'last_avg_max_attention', 'last_max_entropy', 'last_concentration_std', 'variance_diff',
+            'mid_max_entropy', 'last_entropy_std', 'mid_entropy_std', 'mid_variance_std',
+            'mid_concentration_std', 'last_avg_variance', 'last_avg_entropy', 'mid_avg_max_attention',
+            'mid_avg_entropy', 'mid_max_variance', 'last_max_variance', 'entropy_diff',
+            'last_variance_std', 'mid_avg_variance'
+        ]
+
+        # --- 【【【实验选择区】】】---
+        # 一次只取消注释一个实验，运行完成后，再注释掉，换下一个。
+
+        # --- 实验1：只使用最重要的前5个特征 ---
+        print("\n--- 正在运行实验1：Top 5 特征 ---")
+        selected_features = all_18_features_ranked[:5]
+        model_save_path = os.path.join(PROJECT_PATH, "router_model_top5.pth")
+        # -----------------------------------
+
+        # # --- 实验2：只使用最重要的前10个特征 ---
+        # print("\n--- 正在运行实验2：Top 10 特征 ---")
+        # selected_features = all_18_features_ranked[:10]
+        # model_save_path = os.path.join(PROJECT_PATH, "router_model_top10.pth")
+        # # ------------------------------------
+
+        # # --- 实验3：使用全部18个特征 (作为对比基准) ---
+        # print("\n--- 正在运行实验3：全部 18 个特征 ---")
+        # selected_features = all_18_features_ranked
+        # model_save_path = os.path.join(PROJECT_PATH, "router_model_all.pth")
+        # # ------------------------------------
+
+        # --- 执行选定的实验 ---
         train_router(training_data_path=training_file,
                      model_save_path=model_save_path,
                      feature_subset=selected_features)  # 将选定的特征列表传进去
+
+    print("\n✅ 训练流程结束！")
