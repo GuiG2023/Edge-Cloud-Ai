@@ -78,7 +78,7 @@ def generate_router_training_data(evaluator, output_file):
 
                 # 2. 根据步骤数，设定一个清晰、客观的“复杂”标签
                 # 这里的阈值“4”是一个很好的起点，您可以后续进行敏感性分析
-                label = 1.0 if steps > 3 else 0.0
+                label = 1.0 if steps > 4 else 0.0
 
                 # ----------------------------------------------------
 
@@ -133,16 +133,23 @@ def generate_router_training_data(evaluator, output_file):
                 # processed_count += 1
                 # processed_samples.add(problem['question'])
 
-                # --- 【【【核心修改：增加详细进度报告】】】---
+                # --- 【【【最终版：增加详细进度报告】】】---
                 # 每处理20个样本，或者在第一个和最后一个时，打印一次清晰的进度
                 if current_progress % 20 == 0 or current_progress == 1 or current_progress == total_to_process:
+                    # --- 1. 【新的速度计算逻辑】 ---
+                    # 计算从脚本开始到现在，新处理了多少样本
+                    newly_processed_count = processed_count - (simple_label_count + complex_label_count)
+
                     elapsed_time = time.time() - start_time
-                    samples_per_second = (
-                                                     current_progress - processed_count + simple_label_count + complex_label_count) / elapsed_time if elapsed_time > 0 else 0
+                    samples_per_second = newly_processed_count / elapsed_time if elapsed_time > 0 else 0
+
                     print(f"\n--- Progress Update ---")
                     print(f"   Processed: {current_progress}/{total_to_process}")
+
+                    # --- 2. 【新的标签含义说明】 ---
                     print(
-                        f"   Label Counts: Simple (Correct) = {simple_label_count}, Complex (Incorrect) = {complex_label_count}")
+                        f"   Label Counts: Simple (Steps <= 4) = {simple_label_count}, Complex (Steps > 4) = {complex_label_count}")
+
                     print(f"   Speed: {samples_per_second:.2f} samples/sec")
                     print(f"-----------------------")
                 # --- 进度报告结束 ---
@@ -299,7 +306,7 @@ if __name__ == "__main__":
     # --- 2. 【【【第一步：数据生成（总是先执行）】】】---
     # 初始化一个用于数据生成的评估器实例
     # 将 max_samples 设置为您想要生成的训练数据总量，例如2000
-    evaluator_for_data_gen = GSM8KAccuracyEvaluator(hf_token=hf_token, max_samples=100, project_path=PROJECT_PATH)
+    evaluator_for_data_gen = GSM8KAccuracyEvaluator(hf_token=hf_token, max_samples=150, project_path=PROJECT_PATH)
 
     # 调用数据生成函数。
     # 由于此函数支持断点续传，如果数据已完全生成，这步会很快完成。
