@@ -286,7 +286,7 @@ if __name__ == "__main__":
         }
 
         # --- 实验选择开关 ---
-        EXPERIMENT_TO_RUN = "TOP_5"
+        EXPERIMENT_TO_RUN = "TOP_10"
         # ----------------------
 
         selected_features = feature_sets.get(EXPERIMENT_TO_RUN)
