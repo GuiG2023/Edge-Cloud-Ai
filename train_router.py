@@ -246,19 +246,30 @@ def train_router(training_data_path, model_save_path, feature_subset: list, epoc
     print(f"\n✅ Training complete! Model saved to {model_save_path}")
 
 
+# ========================================================================
+# ===== 在 train_router.py 底部，使用这个【最终修正版】来控制实验 =====
+# ========================================================================
+
 if __name__ == "__main__":
-    # 从环境变量中读取 Colab 传递过来的信息
+    # --- 1. 从环境变量中读取 Colab 传递过来的信息 ---
     PROJECT_PATH = os.getenv('PROJECT_PATH_GDRIVE', '.')
     hf_token = os.getenv('HUGGINGFACE_TOKEN')
 
+    # 使用新文件名以避免与旧特征数据混淆
     training_file = os.path.join(PROJECT_PATH, "router_training_data_rich_features.jsonl")
 
-    # 首先，确保富特征数据集存在
-    if not os.path.exists(training_file):
-        print(f"❌ 错误: 富特征数据文件 '{training_file}' 未找到!")
-        print("   请先运行完整的数据生成流程来创建这个文件。")
-        # 您可以在这里添加调用 generate_router_training_data 的逻辑
-    else:
+    # --- 2. 【【【第一步：数据生成（总是先执行）】】】---
+    # 初始化一个用于数据生成的评估器实例
+    # 将 max_samples 设置为您想要生成的训练数据总量，例如2000
+    evaluator_for_data_gen = GSM8KAccuracyEvaluator(hf_token=hf_token, max_samples=2000, project_path=PROJECT_PATH)
+
+    # 调用数据生成函数。
+    # 由于此函数支持断点续传，如果数据已完全生成，这步会很快完成。
+    generate_router_training_data(evaluator_for_data_gen, output_file=training_file)
+
+    # --- 3. 【【【第二步：特征选择与模型训练】】】---
+    # 只有在数据文件确认存在后，才继续进行
+    if os.path.exists(training_file):
         # 您的特征重要性排名 (从高到低)
         all_18_features_ranked = [
             'last_avg_max_attention', 'last_max_entropy', 'last_concentration_std', 'variance_diff',
@@ -268,30 +279,29 @@ if __name__ == "__main__":
             'last_variance_std', 'mid_avg_variance'
         ]
 
-        # --- 【【【实验选择区】】】---
-        # 一次只取消注释一个实验，运行完成后，再注释掉，换下一个。
+        feature_sets = {
+            "TOP_5": all_18_features_ranked[:5],
+            "TOP_10": all_18_features_ranked[:10],
+            "ALL_18": all_18_features_ranked
+        }
 
-        # --- 实验1：只使用最重要的前5个特征 ---
-        print("\n--- 正在运行实验1：Top 5 特征 ---")
-        selected_features = all_18_features_ranked[:5]
-        model_save_path = os.path.join(PROJECT_PATH, "router_model_top5.pth")
-        # -----------------------------------
+        # --- 实验选择开关 ---
+        EXPERIMENT_TO_RUN = "TOP_5"
+        # ----------------------
 
-        # # --- 实验2：只使用最重要的前10个特征 ---
-        # print("\n--- 正在运行实验2：Top 10 特征 ---")
-        # selected_features = all_18_features_ranked[:10]
-        # model_save_path = os.path.join(PROJECT_PATH, "router_model_top10.pth")
-        # # ------------------------------------
+        selected_features = feature_sets.get(EXPERIMENT_TO_RUN)
 
-        # # --- 实验3：使用全部18个特征 (作为对比基准) ---
-        # print("\n--- 正在运行实验3：全部 18 个特征 ---")
-        # selected_features = all_18_features_ranked
-        # model_save_path = os.path.join(PROJECT_PATH, "router_model_all.pth")
-        # # ------------------------------------
+        if selected_features:
+            print(f"\n--- 正在运行特征筛选实验: {EXPERIMENT_TO_RUN} ---")
+            model_save_path = os.path.join(PROJECT_PATH, f"router_model_{EXPERIMENT_TO_RUN}.pth")
 
-        # --- 执行选定的实验 ---
-        train_router(training_data_path=training_file,
-                     model_save_path=model_save_path,
-                     feature_subset=selected_features)  # 将选定的特征列表传进去
+            # 确保 train_router 和 RouterDataset 的定义已更新，能接收 feature_subset
+            train_router(training_data_path=training_file,
+                         model_save_path=model_save_path,
+                         feature_subset=selected_features)
+        else:
+            print(f"❌ 未知的实验名称: {EXPERIMENT_TO_RUN}")
+    else:
+        print(f"❌ 关键错误：数据生成步骤完成后，依然未找到数据文件 '{training_file}'。")
 
     print("\n✅ 训练流程结束！")
