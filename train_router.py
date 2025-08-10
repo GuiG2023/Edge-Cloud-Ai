@@ -261,7 +261,7 @@ if __name__ == "__main__":
     # --- 2. 【【【第一步：数据生成（总是先执行）】】】---
     # 初始化一个用于数据生成的评估器实例
     # 将 max_samples 设置为您想要生成的训练数据总量，例如2000
-    evaluator_for_data_gen = GSM8KAccuracyEvaluator(hf_token=hf_token, max_samples=2000, project_path=PROJECT_PATH)
+    evaluator_for_data_gen = GSM8KAccuracyEvaluator(hf_token=hf_token, max_samples=100, project_path=PROJECT_PATH)
 
     # 调用数据生成函数。
     # 由于此函数支持断点续传，如果数据已完全生成，这步会很快完成。
