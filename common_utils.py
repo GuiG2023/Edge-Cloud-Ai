@@ -120,58 +120,123 @@ class FixedGSM8KProcessor:
 
 # ========================= 可训练的复杂度预测网络 =========================
     # 在 common_utils.py 中
+
 class ComplexityPredictorNet(nn.Module):
-    def __init__(self, input_features: int = 18):  # <--- 从8修改为18
+    def __init__(self, input_features: int = 4):  # <--- 改为4
             super().__init__()
             self.network = nn.Sequential(
-                nn.Linear(input_features, 128),  # <--- 变宽
-                nn.ReLU(),
-                nn.Dropout(0.3),
-                nn.Linear(128, 64),
-                nn.ReLU(),
-                nn.Linear(64, 1)
+                nn.Linear(input_features, 64), nn.ReLU(), nn.Dropout(0.3),
+                nn.Linear(64, 32), nn.ReLU(),
+                nn.Linear(32, 1)
             )
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.network(x)
+            return self.network(x)
+
+    # class ComplexityPredictorNet(nn.Module):
+#     def __init__(self, input_features: int = 18):  # <--- 从8修改为18
+#             super().__init__()
+#             self.network = nn.Sequential(
+#                 nn.Linear(input_features, 128),  # <--- 变宽
+#                 nn.ReLU(),
+#                 nn.Dropout(0.3),
+#                 nn.Linear(128, 64),
+#                 nn.ReLU(),
+#                 nn.Linear(64, 1)
+#             )
+#     def forward(self, x: torch.Tensor) -> torch.Tensor:
+#         return self.network(x)
 
 # ========================= 可学习的智能路由器 =========================
 class LearnedAttentionRouter:
-    """使用一个预训练好的神经网络来代替固定规则，进行路由决策。"""
     def __init__(self, model_path: str, device, threshold=0.5):
         self.device = device
         self.threshold = threshold
         self.model_path = model_path
-        print(f"🧠 Initializing LearnedAttentionRouter...")
-        self.predictor_net = ComplexityPredictorNet().to(self.device)
+        self.predictor_net = ComplexityPredictorNet(input_features=4).to(self.device)  # <--- 输入维度改为4
         if os.path.exists(self.model_path):
-            print(f"   Loading learned predictor from: {self.model_path}")
             self.predictor_net.load_state_dict(torch.load(self.model_path, map_location=self.device))
             self.predictor_net.eval()
-            print("   ✅ Learned predictor loaded successfully.")
-        else:
-            print(f"   ⚠️ Model file {self.model_path} not found! Router will be untrained.")
-            print("   💡 Run 'train_router.py' first to create this file.")
 
-    def route(self, question: str, slm_model, slm_tokenizer) -> Tuple[str, float]:
+    def extract_core_features(self, text: str, model, tokenizer, slm_interface) -> dict:
+        """【【【全新动态特征提取逻辑】】】"""
+        _, attentions_sequence = slm_interface.predict(text, num_tokens_to_generate=15)
+
+        if not attentions_sequence: return {}
+        entropies = []
+        for step_attentions_in_tuple in attentions_sequence:
+            last_layer_attentions = step_attentions_in_tuple[-1]
+            last_token_attentions_dist = last_layer_attentions[0, :, -1, :].flatten().cpu()
+            dist_norm = last_token_attentions_dist / (last_token_attentions_dist.sum() + 1e-9)
+            step_entropy = -torch.sum(dist_norm * torch.log(dist_norm + 1e-9)).item()
+            entropies.append(step_entropy)
+
+        if not entropies or len(entropies) < 2: return {}
+
+        final_features = {
+            'entropy_mean': np.mean(entropies),
+            'entropy_std': np.std(entropies),
+            'entropy_max': np.max(entropies),
+            'entropy_trend': np.polyfit(range(len(entropies)), entropies, 1)[0]
+        }
+        return final_features
+
+    def route(self, question: str, slm_model, slm_tokenizer, slm_interface) -> Tuple[str, float]:
         try:
-            features = self.extract_core_features(question, slm_model, slm_tokenizer)
+            features = self.extract_core_features(question, slm_model, slm_tokenizer, slm_interface)
+            if not features: return "LLM", 1.0
             prediction = self.predict_complexity(features)
-            route_decision = "LLM" if prediction['is_complex'] else "SLM"
-            return route_decision, prediction['complexity_score']
+            return ("LLM" if prediction['is_complex'] else "SLM"), prediction['complexity_score']
         except Exception as e:
             print(f"⚠️ Route decision failed: {e}, defaulting to LLM")
             return "LLM", 1.0
 
     def predict_complexity(self, features: dict) -> dict:
-        feature_vector = torch.tensor([
-            features['avg_entropy'], features['entropy_std'], features['max_entropy'],
-            features['avg_variance'], features['variance_std'], features['max_variance'],
-            features['avg_max_attention'], features['concentration_std']
-        ], dtype=torch.float32).to(self.device)
+        feature_keys = ['entropy_mean', 'entropy_std', 'entropy_max', 'entropy_trend']
+        feature_vector = torch.tensor([features.get(key, 0.0) for key in feature_keys], dtype=torch.float32).to(
+            self.device)
         with torch.no_grad():
             logit = self.predictor_net(feature_vector.unsqueeze(0))
             probability = torch.sigmoid(logit).item()
         return {'complexity_score': probability, 'is_complex': probability > self.threshold}
+
+    # class LearnedAttentionRouter:
+#     """使用一个预训练好的神经网络来代替固定规则，进行路由决策。"""
+#     def __init__(self, model_path: str, device, threshold=0.5):
+#         self.device = device
+#         self.threshold = threshold
+#         self.model_path = model_path
+#         print(f"🧠 Initializing LearnedAttentionRouter...")
+#         self.predictor_net = ComplexityPredictorNet().to(self.device)
+#         if os.path.exists(self.model_path):
+#             print(f"   Loading learned predictor from: {self.model_path}")
+#             self.predictor_net.load_state_dict(torch.load(self.model_path, map_location=self.device))
+#             self.predictor_net.eval()
+#             print("   ✅ Learned predictor loaded successfully.")
+#         else:
+#             print(f"   ⚠️ Model file {self.model_path} not found! Router will be untrained.")
+#             print("   💡 Run 'train_router.py' first to create this file.")
+#
+#     def route(self, question: str, slm_model, slm_tokenizer) -> Tuple[str, float]:
+#         try:
+#             features = self.extract_core_features(question, slm_model, slm_tokenizer)
+#             prediction = self.predict_complexity(features)
+#             route_decision = "LLM" if prediction['is_complex'] else "SLM"
+#             return route_decision, prediction['complexity_score']
+#         except Exception as e:
+#             print(f"⚠️ Route decision failed: {e}, defaulting to LLM")
+#             return "LLM", 1.0
+#
+#     def predict_complexity(self, features: dict) -> dict:
+#         feature_vector = torch.tensor([
+#             features['avg_entropy'], features['entropy_std'], features['max_entropy'],
+#             features['avg_variance'], features['variance_std'], features['max_variance'],
+#             features['avg_max_attention'], features['concentration_std']
+#         ], dtype=torch.float32).to(self.device)
+#         with torch.no_grad():
+#             logit = self.predictor_net(feature_vector.unsqueeze(0))
+#             probability = torch.sigmoid(logit).item()
+#         return {'complexity_score': probability, 'is_complex': probability > self.threshold}
 
     # 在 LearnedAttentionRouter 类中
     def extract_core_features(self, text: str, model, tokenizer) -> dict:
@@ -222,48 +287,39 @@ class SLMInterface(ModelInterface):
         print(f"🔄 Loading SLM: {self.config.name}")
         try:
             self.tokenizer = AutoTokenizer.from_pretrained(self.config.model_path, trust_remote_code=True)
-            self.model = AutoModelForCausalLM.from_pretrained(self.config.model_path, torch_dtype=torch.float16, device_map="auto" if torch.cuda.is_available() else None, trust_remote_code=True, output_attentions=True,attn_implementation="eager" )
+            self.model = AutoModelForCausalLM.from_pretrained(
+                self.config.model_path, torch_dtype=torch.float16,
+                device_map="auto" if torch.cuda.is_available() else None,
+                trust_remote_code=True, output_attentions=True, attn_implementation="eager"
+            )
             if self.tokenizer.pad_token is None: self.tokenizer.pad_token = self.tokenizer.eos_token
             print("✅ SLM loaded successfully")
-        except Exception as e: print(f"❌ Failed to load SLM: {e}"); raise
+        except Exception as e:
+            print(f"❌ Failed to load SLM: {e}"); raise
 
-    def predict(self, question: str) -> str:
-        if self.model is None:
-            self.load_model()
+    def predict(self, question: str, num_tokens_to_generate=0) -> tuple:
+        """
+        【升级版】: num_tokens_to_generate > 0 时, 返回(文本, 注意力序列)
+        """
+        if self.model is None: self.load_model()
+        prompt = f"Solve the following math problem step by step...\n\nQuestion: {question}\nAnswer: Let's think step by step."
+        inputs = self.tokenizer.encode(prompt, return_tensors="pt").to(self.model.device)
 
-        # --- 【【【UPGRADED PROMPT FOR SLM】】】---
-        # This prompt guides the model to reason step-by-step and format the final answer.
-        prompt = f"""Solve the following math problem. Think step by step and then write the final answer in the format #### <answer>.
-
-    Question: {question}
-    Answer: Let's think step by step.
-    """
-        # --- END NEW PROMPT ---
-
-        inputs = self.tokenizer.encode(prompt, return_tensors="pt", max_length=1024, truncation=True)
-        if torch.cuda.is_available():
-            inputs = inputs.to(self.model.device)
+        max_len = num_tokens_to_generate if num_tokens_to_generate > 0 else 200
+        should_return_attentions = num_tokens_to_generate > 0
 
         with torch.no_grad():
             outputs = self.model.generate(
-                inputs,
-                max_new_tokens=200,
-                num_return_sequences=1,
-                do_sample=False,
-                pad_token_id=self.tokenizer.eos_token_id
+                inputs, max_new_tokens=max_len, do_sample=False,
+                pad_token_id=self.tokenizer.eos_token_id,
+                output_attentions=should_return_attentions,
+                return_dict_in_generate=should_return_attentions
             )
 
-        full_response = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
-
-        # Adjust the slicing logic to match the new prompt
-        assistant_response_start = "Answer: Let's think step by step."
-        start_index = full_response.rfind(assistant_response_start)  # Use rfind for robustness
-        if start_index != -1:
-            answer = full_response[start_index + len(assistant_response_start):].strip()
-        else:  # Fallback if the prompt isn't found in the output
-            answer = full_response
-
-        return answer
+        sequence = outputs.sequences[0] if hasattr(outputs, 'sequences') else outputs[0]
+        answer_text = self.tokenizer.decode(sequence[inputs.shape[-1]:], skip_special_tokens=True)
+        attentions = outputs.attentions if should_return_attentions and hasattr(outputs, 'attentions') else None
+        return answer_text, attentions
 
 
 # ==========================================================

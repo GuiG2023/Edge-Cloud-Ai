@@ -70,22 +70,30 @@ def generate_router_training_data(evaluator, output_file):
             current_progress = processed_count + 1
 
             try:
+                # --- 【【【新的标签逻辑】】】---
+                steps = evaluator.data_processor.count_solution_steps(problem['answer'])
+                label = 1.0 if steps > 6 else 0.0  # 使用步骤数作为客观标签
+
+                # --- 【【【新的特征提取调用】】】---
+                features = temp_feature_extractor.extract_core_features(
+                    problem['question'], slm_interface.model, slm_interface.tokenizer, slm_interface
+                )
                 # --- 【【【核心修改：不再依赖SLM的对错】】】---
 
                 # 1. 直接从问题的标准答案中计算解题步骤数
                 # problem['answer'] 此时还是原始的、包含解题步骤的答案文本
-                steps = evaluator.data_processor.count_solution_steps(problem['answer'])
+                # steps = evaluator.data_processor.count_solution_steps(problem['answer'])
 
                 # 2. 根据步骤数，设定一个清晰、客观的“复杂”标签
                 # 这里的阈值“4”是一个很好的起点，您可以后续进行敏感性分析
-                label = 1.0 if steps > 6 else 0.0
+                # label = 1.0 if steps > 6 else 0.0
 
                 # ----------------------------------------------------
 
                 # 特征提取部分保持不变，依然需要SLM的“思考过程”
-                features = temp_feature_extractor.extract_core_features(
-                    problem['question'], slm_interface.model, slm_interface.tokenizer
-                )
+                # features = temp_feature_extractor.extract_core_features(
+                #     problem['question'], slm_interface.model, slm_interface.tokenizer
+                # )
 
                 # 如果特征提取失败，则跳过该样本
                 if not features:
@@ -163,15 +171,10 @@ def generate_router_training_data(evaluator, output_file):
     print(f"   Final Label Distribution: Simple = {simple_label_count}, Complex = {complex_label_count}")
 # 在 train_router.py 中
 class RouterDataset(Dataset):
-    def __init__(self, data_path):
+    def __init__(self, data_path, feature_subset=None):
         self.samples = []
-        self.feature_keys = [
-            'mid_avg_entropy', 'mid_entropy_std', 'mid_max_entropy', 'mid_avg_variance',
-            'mid_variance_std', 'mid_max_variance', 'mid_avg_max_attention', 'mid_concentration_std',
-            'last_avg_entropy', 'last_entropy_std', 'last_max_entropy', 'last_avg_variance',
-            'last_variance_std', 'last_max_variance', 'last_avg_max_attention', 'last_concentration_std',
-            'entropy_diff', 'variance_diff'
-        ]
+        self.feature_keys = feature_subset if feature_subset else ['entropy_mean', 'entropy_std', 'entropy_max',
+                                                                   'entropy_trend']
         with open(data_path, 'r', encoding='utf-8') as f:
             for line in f:
                 sample = json.loads(line)
@@ -186,70 +189,6 @@ class RouterDataset(Dataset):
     def __getitem__(self, idx): return self.samples[idx]
 
 
-def train_router(training_data_path, model_save_path, epochs=20, lr=1e-4, batch_size=32):
-    from common_utils import ComplexityPredictorNet  # Local import
-    print("\n" + "=" * 50 + "\n🚀 Training the smart router...\n" + "=" * 50)
-    dataset = RouterDataset(training_data_path)
-    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
-    model = ComplexityPredictorNet().to(device)
-    criterion = nn.BCEWithLogitsLoss()
-    optimizer = optim.Adam(model.parameters(), lr=lr)
-
-    for epoch in range(epochs):
-        model.train()
-        total_loss, correct_preds, total_samples = 0, 0, 0
-        for batch in dataloader:
-            features, labels = batch['features'].to(device), batch['label'].to(device)
-            optimizer.zero_grad()
-            outputs = model(features)
-            loss = criterion(outputs, labels)
-            loss.backward()
-            optimizer.step()
-            total_loss += loss.item()
-            preds = torch.sigmoid(outputs) > 0.5
-            correct_preds += (preds == labels.bool()).sum().item()
-            total_samples += labels.size(0)
-        avg_loss = total_loss / len(dataloader)
-        accuracy = correct_preds / total_samples
-        print(f"Epoch {epoch + 1:02d}/{epochs} | Loss: {avg_loss:.4f} | Accuracy: {accuracy:.2%}")
-
-    torch.save(model.state_dict(), model_save_path)
-    print(f"\n✅ Training complete! Model saved to {model_save_path}")
-
-
-# train_router.py (最终修正版)
-
-# ==========================================================
-# ===== 修改点 1: RouterDataset 现在接收 feature_subset =====
-# ==========================================================
-class RouterDataset(Dataset):
-    def __init__(self, data_path, feature_subset: list):
-        self.samples = []
-        self.feature_keys = feature_subset  # 直接使用传入的特征列表
-
-        print(f"--- Dataset Initialized using {len(self.feature_keys)} features: {self.feature_keys} ---")
-
-        with open(data_path, 'r', encoding='utf-8') as f:
-            for line in f:
-                try:
-                    sample = json.loads(line)
-                    # 严格按照传入的feature_keys顺序和数量构建特征向量
-                    feature_vector = [sample['features'].get(key, 0.0) for key in self.feature_keys]
-                    self.samples.append({
-                        "features": torch.tensor(feature_vector, dtype=torch.float32),
-                        "label": torch.tensor([sample['label']], dtype=torch.float32)
-                    })
-                except (json.JSONDecodeError, KeyError) as e:
-                    print(f"Warning: Skipping a malformed line in dataset. Error: {e}")
-                    continue
-
-    def __len__(self):
-        return len(self.samples)
-
-    def __getitem__(self, idx):
-        return self.samples[idx]
-
-
 # ==============================================================
 # ===== 修改点 2: train_router 现在也接收 feature_subset =====
 # ==============================================================
@@ -261,7 +200,7 @@ def train_router(training_data_path, model_save_path, feature_subset: list, epoc
     dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
 
     # 2. 【关键】根据特征子集的数量，动态创建模型
-    num_features = len(feature_subset)
+    num_features = len(feature_subset)if feature_subset else 4
     model = ComplexityPredictorNet(input_features=num_features).to(device)
 
     criterion = nn.BCEWithLogitsLoss()
