@@ -175,10 +175,53 @@ if __name__ == "__main__":
     PROJECT_PATH = os.getenv('PROJECT_PATH_GDRIVE', '.')
     hf_token = os.getenv('HUGGINGFACE_TOKEN')
 
-    evaluator = GSM8KAccuracyEvaluator(hf_token=hf_token, max_samples=100, project_path=PROJECT_PATH)
+    # evaluator = GSM8KAccuracyEvaluator(hf_token=hf_token, max_samples=100, project_path=PROJECT_PATH)
+    #
+    # training_file = os.path.join(PROJECT_PATH, "router_training_data.jsonl")
+    # model_file = os.path.join(PROJECT_PATH, "router_model.pth")
+    #
+    # generate_router_training_data(evaluator, output_file=training_file)
+    # train_router(training_data_path=training_file, model_save_path=model_file)
 
     training_file = os.path.join(PROJECT_PATH, "router_training_data.jsonl")
-    model_file = os.path.join(PROJECT_PATH, "router_model.pth")
 
-    generate_router_training_data(evaluator, output_file=training_file)
-    train_router(training_data_path=training_file, model_save_path=model_file)
+    # 目前特征重要性排名 (从高到低)
+    all_18_features_ranked = [
+        'last_avg_max_attention', 'last_max_entropy', 'last_concentration_std', 'variance_diff',
+        'mid_max_entropy', 'last_entropy_std', 'mid_entropy_std', 'mid_variance_std',
+        'mid_concentration_std', 'last_avg_variance', 'last_avg_entropy', 'mid_avg_max_attention',
+        'mid_avg_entropy', 'mid_max_variance', 'last_max_variance', 'entropy_diff',
+        'last_variance_std', 'mid_avg_variance'
+    ]
+
+    # --- 【【【实验选择区】】】---
+    # 一次只取消注释一个实验，运行完成后，再注释掉，换下一个。
+
+    # --- 实验1：只使用最重要的前5个特征 ---
+    print("\n--- 正在运行实验1：Top 5 特征 ---")
+    selected_features = all_18_features_ranked[:5]
+    model_save_path = os.path.join(PROJECT_PATH, "router_model_top5.pth")
+    # -----------------------------------
+
+    # # --- 实验2：只使用最重要的前10个特征 ---
+    # print("\n--- 正在运行实验2：Top 10 特征 ---")
+    # selected_features = all_18_features_ranked[:10]
+    # model_save_path = os.path.join(PROJECT_PATH, "router_model_top10.pth")
+    # # ------------------------------------
+
+    # # --- 实验3：使用全部18个特征 (作为对比基准) ---
+    # print("\n--- 正在运行实验3：全部 18 个特征 ---")
+    # selected_features = all_18_features_ranked
+    # model_save_path = os.path.join(PROJECT_PATH, "router_model_all.pth")
+    # # ------------------------------------
+
+    # --- 执行选定的实验 ---
+    # 确保数据已生成
+    if not os.path.exists(training_file):
+        print("❌ 错误：训练数据文件未找到，请先运行完整的数据生成流程。")
+    else:
+        # 您还需要稍微修改 train_router 和 RouterDataset 的定义，让它们能接收 feature_subset
+        # 这里假设您已经修改完毕
+        train_router(training_data_path=training_file,
+                     model_save_path=model_save_path,
+                     feature_subset=selected_features)  # 将选定的特征列表传进去
