@@ -78,7 +78,7 @@ def generate_router_training_data(evaluator, output_file):
 
                 # 2. 根据步骤数，设定一个清晰、客观的“复杂”标签
                 # 这里的阈值“4”是一个很好的起点，您可以后续进行敏感性分析
-                label = 1.0 if steps > 5 else 0.0
+                label = 1.0 if steps > 6 else 0.0
 
                 # ----------------------------------------------------
 
@@ -148,7 +148,7 @@ def generate_router_training_data(evaluator, output_file):
 
                     # --- 2. 【新的标签含义说明】 ---
                     print(
-                        f"   Label Counts: Simple (Steps <= 4) = {simple_label_count}, Complex (Steps > 4) = {complex_label_count}")
+                        f"   Label Counts: Simple (Steps < 6) = {simple_label_count}, Complex (Steps >= 6) = {complex_label_count}")
 
                     print(f"   Speed: {samples_per_second:.2f} samples/sec")
                     print(f"-----------------------")
