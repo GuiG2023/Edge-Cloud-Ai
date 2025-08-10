@@ -78,7 +78,7 @@ def generate_router_training_data(evaluator, output_file):
 
                 # 2. 根据步骤数，设定一个清晰、客观的“复杂”标签
                 # 这里的阈值“4”是一个很好的起点，您可以后续进行敏感性分析
-                label = 1.0 if steps > 4 else 0.0
+                label = 1.0 if steps > 5 else 0.0
 
                 # ----------------------------------------------------
 
@@ -306,7 +306,7 @@ if __name__ == "__main__":
     # --- 2. 【【【第一步：数据生成（总是先执行）】】】---
     # 初始化一个用于数据生成的评估器实例
     # 将 max_samples 设置为您想要生成的训练数据总量，例如2000
-    evaluator_for_data_gen = GSM8KAccuracyEvaluator(hf_token=hf_token, max_samples=150, project_path=PROJECT_PATH)
+    evaluator_for_data_gen = GSM8KAccuracyEvaluator(hf_token=hf_token, max_samples=300, project_path=PROJECT_PATH)
 
     # 调用数据生成函数。
     # 由于此函数支持断点续传，如果数据已完全生成，这步会很快完成。
