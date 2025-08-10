@@ -70,30 +70,68 @@ def generate_router_training_data(evaluator, output_file):
             current_progress = processed_count + 1
 
             try:
-                slm_response = slm_interface.predict(problem['question'])
-                slm_answer = validator.extract_final_answer(slm_response)
-                gt_answer = evaluator.data_processor.extract_answer(problem['answer'])
-                is_slm_correct = validator.is_correct(slm_answer, gt_answer)
+                # --- 【【【核心修改：不再依赖SLM的对错】】】---
 
-                label = 1.0 if not is_slm_correct else 0.0
+                # 1. 直接从问题的标准答案中计算解题步骤数
+                # problem['answer'] 此时还是原始的、包含解题步骤的答案文本
+                steps = evaluator.data_processor.count_solution_steps(problem['answer'])
 
-                # --- 【【【新增】】】更新计数器 ---
-                if label == 0.0:
-                    simple_label_count += 1
-                else:
-                    complex_label_count += 1
-                # --------------------------------
+                # 2. 根据步骤数，设定一个清晰、客观的“复杂”标签
+                # 这里的阈值“4”是一个很好的起点，您可以后续进行敏感性分析
+                label = 1.0 if steps > 3 else 0.0
 
+                # ----------------------------------------------------
+
+                # 特征提取部分保持不变，依然需要SLM的“思考过程”
                 features = temp_feature_extractor.extract_core_features(
                     problem['question'], slm_interface.model, slm_interface.tokenizer
                 )
 
-                sample_to_save = {"question": problem['question'], "features": features, "label": label}
+                # 如果特征提取失败，则跳过该样本
+                if not features:
+                    print(f"\n   ⚠️ Skipped problem #{i} due to feature extraction failure.")
+                    continue
+
+                # 后续的计数、保存逻辑保持不变
+                if label == 0.0:
+                    simple_label_count += 1
+                else:
+                    complex_label_count += 1
+
+                sample_to_save = {
+                    "question": problem['question'],
+                    "features": features,
+                    "label": label
+                }
 
                 f.write(json.dumps(sample_to_save) + '\n')
                 f.flush()
                 processed_count += 1
                 processed_samples.add(problem['question'])
+                # slm_response = slm_interface.predict(problem['question'])
+                # slm_answer = validator.extract_final_answer(slm_response)
+                # gt_answer = evaluator.data_processor.extract_answer(problem['answer'])
+                # is_slm_correct = validator.is_correct(slm_answer, gt_answer)
+                #
+                # label = 1.0 if not is_slm_correct else 0.0
+                #
+                # # --- 【【【新增】】】更新计数器 ---
+                # if label == 0.0:
+                #     simple_label_count += 1
+                # else:
+                #     complex_label_count += 1
+                # # --------------------------------
+                #
+                # features = temp_feature_extractor.extract_core_features(
+                #     problem['question'], slm_interface.model, slm_interface.tokenizer
+                # )
+                #
+                # sample_to_save = {"question": problem['question'], "features": features, "label": label}
+                #
+                # f.write(json.dumps(sample_to_save) + '\n')
+                # f.flush()
+                # processed_count += 1
+                # processed_samples.add(problem['question'])
 
                 # --- 【【【核心修改：增加详细进度报告】】】---
                 # 每处理20个样本，或者在第一个和最后一个时，打印一次清晰的进度
@@ -286,7 +324,7 @@ if __name__ == "__main__":
         }
 
         # --- 实验选择开关 ---
-        EXPERIMENT_TO_RUN = "TOP_10"
+        EXPERIMENT_TO_RUN = "ALL_18"
         # ----------------------
 
         selected_features = feature_sets.get(EXPERIMENT_TO_RUN)
