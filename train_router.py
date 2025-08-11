@@ -182,41 +182,33 @@ def generate_router_training_data(evaluator, output_file):
 
 
 # 在 train_router.py 中
-class RouterDataset(Dataset):
-    def __init__(self, data_path, scaler=None):
-        self.samples = []
-        self.feature_keys = ['entropy_mean', 'entropy_std', 'entropy_max', 'entropy_trend']
 
-        # 先加载所有数据
-        all_features_list = []
+class RouterDataset(Dataset):
+    def __init__(self, data_path, feature_subset: list):  # <--- 【核心修正】在这里接收 feature_subset
+        self.samples = []
+        self.feature_keys = feature_subset  # 直接使用传入的特征列表
+
+        print(f"--- Dataset Initialized using {len(self.feature_keys)} features: {self.feature_keys} ---")
+
         with open(data_path, 'r', encoding='utf-8') as f:
             for line in f:
-                sample = json.loads(line)
-                feature_vector = [sample['features'].get(key, 0.0) for key in self.feature_keys]
-                all_features_list.append((feature_vector, sample['label']))
+                try:
+                    sample = json.loads(line)
+                    # 严格按照传入的feature_keys顺序和数量构建特征向量
+                    feature_vector = [sample['features'].get(key, 0.0) for key in self.feature_keys]
+                    self.samples.append({
+                        "features": torch.tensor(feature_vector, dtype=torch.float32),
+                        "label": torch.tensor([sample['label']], dtype=torch.float32)
+                    })
+                except (json.JSONDecodeError, KeyError) as e:
+                    print(f"Warning: Skipping a malformed line in dataset. Error: {e}")
+                    continue
 
-        # 从数据中提取特征和标签
-        features_to_scale = [item[0] for item in all_features_list]
-        labels_to_keep = [item[1] for item in all_features_list]
+    def __len__(self):
+        return len(self.samples)
 
-        # 【【【核心修改：特征标准化】】】
-        if scaler is None:
-            self.scaler = StandardScaler()
-            scaled_features = self.scaler.fit_transform(features_to_scale)
-        else:
-            self.scaler = scaler
-            scaled_features = self.scaler.transform(features_to_scale)
-        # --------------------------------
-
-        # 将标准化后的特征和标签存入self.samples
-        for i in range(len(scaled_features)):
-            self.samples.append({
-                "features": torch.tensor(scaled_features[i], dtype=torch.float32),
-                "label": torch.tensor([labels_to_keep[i]], dtype=torch.float32)
-            })
-
-    def __len__(self): return len(self.samples)
-    def __getitem__(self, idx): return self.samples[idx]
+    def __getitem__(self, idx):
+        return self.samples[idx]
 
 
 # ==============================================================
