@@ -149,35 +149,37 @@ class ComplexityPredictorNet(nn.Module):
 
 # ========================= 可学习的智能路由器 =========================
 class LearnedAttentionRouter:
-    def __init__(self, model_path: str, device, threshold=0.5):
-        self.device = device
-        self.threshold = threshold
-        self.model_path = model_path
-        self.predictor_net = ComplexityPredictorNet(input_features=4).to(self.device)  # <--- 输入维度改为4
-        if os.path.exists(self.model_path):
-            self.predictor_net.load_state_dict(torch.load(self.model_path, map_location=self.device))
-            self.predictor_net.eval()
-
     def extract_core_features(self, text: str, model, tokenizer, slm_interface) -> dict:
         """【【【全新动态特征提取逻辑】】】"""
+        # 1. 调用SLM生成前15个token，并获取每一步的注意力序列
         _, attentions_sequence = slm_interface.predict(text, num_tokens_to_generate=15)
 
-        if not attentions_sequence: return {}
+        if not attentions_sequence:
+            print("   ⚠️ Warning: Attentions not found in generation output.")
+            return {}  # 如果出错，返回空字典
+
         entropies = []
+        # 2. 遍历生成过程中的每一步
         for step_attentions_in_tuple in attentions_sequence:
-            last_layer_attentions = step_attentions_in_tuple[-1]
+            # 我们只关心最后一层的注意力
+            last_layer_attentions = step_attentions_in_tuple[-1]  # 形状: [batch, heads, seq, seq]
+            # 只看最新生成的那个token，它对前面所有token的注意力分布
             last_token_attentions_dist = last_layer_attentions[0, :, -1, :].flatten().cpu()
+
+            # 3. 为每一步计算熵
             dist_norm = last_token_attentions_dist / (last_token_attentions_dist.sum() + 1e-9)
             step_entropy = -torch.sum(dist_norm * torch.log(dist_norm + 1e-9)).item()
             entropies.append(step_entropy)
 
-        if not entropies or len(entropies) < 2: return {}
+        if not entropies or len(entropies) < 2:
+            return {}
 
+        # 4. 从这个熵的时间序列中，提取最终的统计特征
         final_features = {
-            'entropy_mean': np.mean(entropies),
-            'entropy_std': np.std(entropies),
-            'entropy_max': np.max(entropies),
-            'entropy_trend': np.polyfit(range(len(entropies)), entropies, 1)[0]
+            'entropy_mean': np.mean(entropies),  # 过程平均熵
+            'entropy_std': np.std(entropies),  # 熵波动性 (关键特征!)
+            'entropy_max': np.max(entropies),  # 过程中的困惑峰值 (关键特征!)
+            'entropy_trend': np.polyfit(range(len(entropies)), entropies, 1)[0]  # 熵的变化趋势
         }
         return final_features
 

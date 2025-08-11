@@ -319,16 +319,49 @@ class SLMInterface(ModelInterface):
             print(f"❌ Failed to load SLM: {e}");
             raise
 
-    def predict(self, question: str) -> str:
+    def predict(self, question: str, num_tokens_to_generate=0) -> tuple:
+        """
+        【最终升级版 predict 方法】
+        - 使用思维链提示，并规定了输出格式。
+        - 使用贪婪搜索 (do_sample=False) 保证结果可复现。
+        - 在需要时，可以只生成少量token并返回注意力序列。
+        """
         if self.model is None: self.load_model()
-        prompt = f"Question: {question}\nAnswer: Let me solve this step by step.\n"
-        inputs = self.tokenizer.encode(prompt, return_tensors="pt", max_length=1024, truncation=True)
-        if torch.cuda.is_available(): inputs = inputs.to(self.model.device)
+
+        # --- 1. 使用新的、更优化的“思维链”提示 ---
+        prompt = f"""Solve the following math problem. Think step by step and then write the final answer in the format #### <answer>.
+
+        Question: {question}
+        Answer: Let's think step by step.
+        """
+
+        inputs = self.tokenizer.encode(prompt, return_tensors="pt").to(self.model.device)
+
+        max_len = num_tokens_to_generate if num_tokens_to_generate > 0 else 200
+        should_return_attentions = num_tokens_to_generate > 0
+
         with torch.no_grad():
-            outputs = self.model.generate(inputs, max_new_tokens=200, do_sample=True, temperature=0.7, top_p=0.9,
-                                          pad_token_id=self.tokenizer.eos_token_id)
-        full_response = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
-        return full_response[len(prompt):].strip()
+            outputs = self.model.generate(
+                inputs,
+                max_new_tokens=max_len,
+                do_sample=False,  # <--- 2. 改为贪婪搜索，保证结果确定性
+                pad_token_id=self.tokenizer.eos_token_id,
+                output_attentions=should_return_attentions,
+                return_dict_in_generate=should_return_attentions
+            )
+
+        sequence = outputs.sequences[0] if hasattr(outputs, 'sequences') else outputs[0]
+        full_response = self.tokenizer.decode(sequence, skip_special_tokens=True)
+
+        # 3. 调整答案切分逻辑以匹配新提示
+        assistant_response_start = "Answer: Let's think step by step."
+        start_index = full_response.rfind(assistant_response_start)
+        answer_text = full_response[
+                      start_index + len(assistant_response_start):].strip() if start_index != -1 else full_response
+
+        attentions = outputs.attentions if should_return_attentions and hasattr(outputs, 'attentsions') else None
+
+        return answer_text, attentions
 
 
 class EnhancedLLMInterface(ModelInterface):
