@@ -149,6 +149,22 @@ class ComplexityPredictorNet(nn.Module):
 
 # ========================= 可学习的智能路由器 =========================
 class LearnedAttentionRouter:
+    def __init__(self, model_path: str, device, threshold: float = 0.5):
+        self.device = device
+        self.threshold = threshold
+        self.model_path = model_path
+
+        # 您需要确保 ComplexityPredictorNet 的定义在此之前
+        # 并且 input_features 的数量是正确的
+        self.predictor_net = ComplexityPredictorNet(input_features=4).to(self.device)
+
+        if os.path.exists(self.model_path):
+            print(f"   Loading learned predictor from: {self.model_path}")
+            self.predictor_net.load_state_dict(torch.load(self.model_path, map_location=self.device))
+            self.predictor_net.eval()
+            print("   ✅ Learned predictor loaded successfully.")
+        else:
+            print(f"   ⚠️ Model file {self.model_path} not found! Router will be untrained.")
     def extract_core_features(self, text: str, model, tokenizer, slm_interface) -> dict:
         """【【【全新动态特征提取逻辑】】】"""
         # 1. 调用SLM生成前15个token，并获取每一步的注意力序列
