@@ -1,5 +1,7 @@
 import os
 import json
+
+import numpy as np
 import torch
 from torch import nn
 import torch.optim as optim
@@ -7,6 +9,9 @@ from torch.utils.data import Dataset, DataLoader
 from common_utils import GSM8KAccuracyEvaluator, device, LearnedAttentionRouter, AccuracyValidator, \
     ComplexityPredictorNet
 from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import StandardScaler
+from sklearn.model_selection import train_test_split
+import pickle # 用于保存标准化处理器
 
 # ========================================================================
 # ===== 在 train_router.py 文件中，使用这个新版本的函数来替换旧的 =====
@@ -211,43 +216,87 @@ class RouterDataset(Dataset):
         return self.samples[idx]
 
 
-# ==============================================================
-# ===== 修改点 2: train_router 现在也接收 feature_subset =====
-# ==============================================================
-def train_router(training_data_path, model_save_path, feature_subset: list, epochs=20, lr=1e-4, batch_size=32):
-    print("\n" + "=" * 50 + f"\n🚀 Training the smart router with {len(feature_subset)} features...\n" + "=" * 50)
+# ==========================================================
+# ===== 在 train_router.py 中，使用这个【最终版】的函数 =====
+# ==========================================================
+def train_router(training_data_path, model_save_path, feature_subset, epochs=20, lr=1e-4, batch_size=32):
+    from common_utils import ComplexityPredictorNet # 局部导入
+    print(f"\n🚀 Training the smart router with {len(feature_subset)} features...")
 
-    # 1. 使用传入的特征子集来创建数据集
+    # 1. 加载数据
     dataset = RouterDataset(training_data_path, feature_subset=feature_subset)
-    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
 
-    # 2. 【关键】根据特征子集的数量，动态创建模型
-    num_features = len(feature_subset) if feature_subset else 4
-    model = ComplexityPredictorNet(input_features=num_features).to(device)
+    # 将数据集转换为numpy数组，方便处理
+    all_features = np.array([s['features'].numpy() for s in dataset])
+    all_labels = np.array([s['label'].numpy() for s in dataset])
 
+    # 2. 划分训练集和验证集 (80/20)
+    X_train, X_val, y_train, y_val = train_test_split(
+        all_features, all_labels, test_size=0.2, random_state=42, stratify=all_labels
+    )
+    print(f"--- Data split: {len(X_train)} for training, {len(X_val)} for validation ---")
+
+    # 3. 【【【核心修改：特征标准化】】】
+    # 创建一个标准化处理器，并用【训练集】的数据进行拟合
+    scaler = StandardScaler()
+    X_train_scaled = scaler.fit_transform(X_train)
+
+    # 用同一个scaler来转换验证集
+    X_val_scaled = scaler.transform(X_val)
+
+    # 保存这个scaler，以便未来在评估时使用
+    scaler_path = os.path.join(os.path.dirname(model_save_path), "router_scaler.pkl")
+    with open(scaler_path, 'wb') as f:
+        pickle.dump(scaler, f)
+    print(f"✅ Feature scaler saved to {scaler_path}")
+    # ----------------------------------------------
+
+    # 4. 创建PyTorch的Dataset和DataLoader
+    train_tensor_dataset = torch.utils.data.TensorDataset(torch.tensor(X_train_scaled, dtype=torch.float32), torch.tensor(y_train, dtype=torch.float32))
+    val_tensor_dataset = torch.utils.data.TensorDataset(torch.tensor(X_val_scaled, dtype=torch.float32), torch.tensor(y_val, dtype=torch.float32))
+
+    train_dataloader = DataLoader(train_tensor_dataset, batch_size=batch_size, shuffle=True)
+    val_dataloader = DataLoader(val_tensor_dataset, batch_size=batch_size)
+
+    # 5. 模型、损失和优化器
+    model = ComplexityPredictorNet(input_features=len(feature_subset)).to(device)
     criterion = nn.BCEWithLogitsLoss()
     optimizer = optim.Adam(model.parameters(), lr=lr)
 
-    # 3. 训练循环 (保持不变)
+    # 6. 训练循环 (现在包含验证步骤)
     for epoch in range(epochs):
         model.train()
-        total_loss, correct_preds, total_samples = 0, 0, 0
-        for batch in dataloader:
-            features, labels = batch['features'].to(device), batch['label'].to(device)
+        train_loss, train_correct, train_total = 0, 0, 0
+        for features, labels in train_dataloader:
+            features, labels = features.to(device), labels.to(device)
             optimizer.zero_grad()
             outputs = model(features)
             loss = criterion(outputs, labels)
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0) # 增加梯度裁剪
             optimizer.step()
-            total_loss += loss.item()
-            preds = torch.sigmoid(outputs) > 0.5
-            correct_preds += (preds == labels.bool()).sum().item()
-            total_samples += labels.size(0)
 
-        avg_loss = total_loss / len(dataloader)
-        accuracy = correct_preds / total_samples
-        print(f"Epoch {epoch + 1:02d}/{epochs} | Loss: {avg_loss:.4f} | Accuracy: {accuracy:.2%}")
+            train_loss += loss.item()
+            preds = torch.sigmoid(outputs) > 0.5
+            train_correct += (preds == labels.bool()).sum().item()
+            train_total += labels.size(0)
+
+        # 在每个epoch后进行验证
+        model.eval()
+        val_loss, val_correct, val_total = 0, 0, 0
+        with torch.no_grad():
+            for features, labels in val_dataloader:
+                features, labels = features.to(device), labels.to(device)
+                outputs = model(features)
+                loss = criterion(outputs, labels)
+                val_loss += loss.item()
+                preds = torch.sigmoid(outputs) > 0.5
+                val_correct += (preds == labels.bool()).sum().item()
+                val_total += labels.size(0)
+
+        print(f"Epoch {epoch+1:02d}/{epochs} | "
+              f"Train Loss: {train_loss/len(train_dataloader):.4f} | Train Acc: {train_correct/train_total:.2%} | "
+              f"Val Loss: {val_loss/len(val_dataloader):.4f} | Val Acc: {val_correct/val_total:.2%}")
 
     torch.save(model.state_dict(), model_save_path)
     print(f"\n✅ Training complete! Model saved to {model_save_path}")
