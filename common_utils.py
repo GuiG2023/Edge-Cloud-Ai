@@ -13,7 +13,7 @@ from typing import Dict, List, Tuple, Optional
 import random
 from torch import nn
 # 在 common_utils.py 文件顶部
-from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig # <--- 增加 BitsAndBytesConfig
+from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig  # <--- 增加 BitsAndBytesConfig
 
 # GPU设置
 if torch.cuda.is_available():
@@ -23,17 +23,21 @@ else:
     device = torch.device('cpu')
     print("💻 Using CPU")
 
+
 # ========================= 基础配置类 =========================
 class ModelConfig:
     """模型配置类"""
+
     def __init__(self, name: str, model_path: str, cost_per_token: float, avg_latency_ms: int):
         self.name = name
         self.model_path = model_path
         self.cost_per_token = cost_per_token
         self.avg_latency_ms = avg_latency_ms
 
+
 class ModelInterface:
     """模型接口基类"""
+
     def __init__(self, config: ModelConfig):
         self.config = config
         self.model = None
@@ -42,9 +46,11 @@ class ModelInterface:
     def predict(self, question: str) -> str:
         raise NotImplementedError
 
+
 # ========================= GSM8K数据处理器 =========================
 class FixedGSM8KProcessor:
     """修复版GSM8K数据处理器"""
+
     def __init__(self, data_path="gsm8k_data/train.jsonl", max_samples=1000):
         print(f"📚 Loading GSM8K dataset...")
         self.data_path = data_path
@@ -68,7 +74,8 @@ class FixedGSM8KProcessor:
                 self.samples.append({'question': data_split[i]['question'], 'answer': data_split[i]['answer']})
             return len(self.samples) > 0
         except Exception as e:
-            print(f"⚠️ Failed to load from datasets: {e}"); return False
+            print(f"⚠️ Failed to load from datasets: {e}");
+            return False
 
     def _load_from_local(self):
         try:
@@ -79,9 +86,11 @@ class FixedGSM8KProcessor:
                         try:
                             self.samples.append(json.loads(line))
                             if len(self.samples) >= self.max_samples: break
-                        except: continue
+                        except:
+                            continue
             return len(self.samples) > 0
-        except: return False
+        except:
+            return False
 
     def extract_answer(self, answer_text: str) -> str:
         match = re.search(r'####\s*([+-]?[\d,]+(?:\.\d+)?)', answer_text)
@@ -97,9 +106,12 @@ class FixedGSM8KProcessor:
         return max(len(meaningful_lines) - 1, math_operations, equals_count, 1)
 
     def classify_difficulty(self, steps: int) -> str:
-        if steps <= 4: return "simple"
-        elif steps <= 8: return "medium"
-        else: return "complex"
+        if steps <= 4:
+            return "simple"
+        elif steps <= 8:
+            return "medium"
+        else:
+            return "complex"
 
     def get_balanced_sample(self, n_total: int = 200, simple_ratio: float = 0.5) -> Tuple[List, List]:
         print(f"🎯 准备采样 {n_total} 道题目 (简单题比例: {simple_ratio:.1%})")
@@ -107,9 +119,12 @@ class FixedGSM8KProcessor:
         print("📋 正在分析问题复杂度...")
         for i, item in enumerate(self.samples):
             steps = self.count_solution_steps(item['answer'])
-            problem_data = {'question': item['question'], 'answer': self.extract_answer(item['answer']), 'difficulty': self.classify_difficulty(steps)}
-            if problem_data['difficulty'] == "simple": simple_problems.append(problem_data)
-            else: complex_problems.append(problem_data)
+            problem_data = {'question': item['question'], 'answer': self.extract_answer(item['answer']),
+                            'difficulty': self.classify_difficulty(steps)}
+            if problem_data['difficulty'] == "simple":
+                simple_problems.append(problem_data)
+            else:
+                complex_problems.append(problem_data)
         print(f"✅ 分类完成: {len(simple_problems)} 简单题, {len(complex_problems)} 复杂题")
         n_simple = int(n_total * simple_ratio)
         n_complex = n_total - n_simple
@@ -118,22 +133,25 @@ class FixedGSM8KProcessor:
         print(f"🎲 最终采样: {len(sampled_simple)} 简单题, {len(sampled_complex)} 复杂题")
         return sampled_simple, sampled_complex
 
+
 # ========================= 可训练的复杂度预测网络 =========================
-    # 在 common_utils.py 中
+# 在 common_utils.py 中
 
 class ComplexityPredictorNet(nn.Module):
     def __init__(self, input_features: int = 4):  # <--- 改为4
-            super().__init__()
-            self.network = nn.Sequential(
-                nn.Linear(input_features, 64), nn.ReLU(), nn.Dropout(0.3),
-                nn.Linear(64, 32), nn.ReLU(),
-                nn.Linear(32, 1)
-            )
+        super().__init__()
+        self.network = nn.Sequential(
+            nn.Linear(input_features, 64), nn.ReLU(), nn.Dropout(0.3),
+            nn.Linear(64, 32), nn.ReLU(),
+            nn.Linear(32, 1)
+        )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-            return self.network(x)
+        return self.network(x)
 
     # class ComplexityPredictorNet(nn.Module):
+
+
 #     def __init__(self, input_features: int = 18):  # <--- 从8修改为18
 #             super().__init__()
 #             self.network = nn.Sequential(
@@ -165,6 +183,7 @@ class LearnedAttentionRouter:
             print("   ✅ Learned predictor loaded successfully.")
         else:
             print(f"   ⚠️ Model file {self.model_path} not found! Router will be untrained.")
+
     def extract_core_features(self, text: str, model, tokenizer, slm_interface) -> dict:
         """【【【全新动态特征提取逻辑】】】"""
         # 1. 调用SLM生成前15个token，并获取每一步的注意力序列
@@ -219,42 +238,42 @@ class LearnedAttentionRouter:
         return {'complexity_score': probability, 'is_complex': probability > self.threshold}
 
     # class LearnedAttentionRouter:
-#     """使用一个预训练好的神经网络来代替固定规则，进行路由决策。"""
-#     def __init__(self, model_path: str, device, threshold=0.5):
-#         self.device = device
-#         self.threshold = threshold
-#         self.model_path = model_path
-#         print(f"🧠 Initializing LearnedAttentionRouter...")
-#         self.predictor_net = ComplexityPredictorNet().to(self.device)
-#         if os.path.exists(self.model_path):
-#             print(f"   Loading learned predictor from: {self.model_path}")
-#             self.predictor_net.load_state_dict(torch.load(self.model_path, map_location=self.device))
-#             self.predictor_net.eval()
-#             print("   ✅ Learned predictor loaded successfully.")
-#         else:
-#             print(f"   ⚠️ Model file {self.model_path} not found! Router will be untrained.")
-#             print("   💡 Run 'train_router.py' first to create this file.")
-#
-#     def route(self, question: str, slm_model, slm_tokenizer) -> Tuple[str, float]:
-#         try:
-#             features = self.extract_core_features(question, slm_model, slm_tokenizer)
-#             prediction = self.predict_complexity(features)
-#             route_decision = "LLM" if prediction['is_complex'] else "SLM"
-#             return route_decision, prediction['complexity_score']
-#         except Exception as e:
-#             print(f"⚠️ Route decision failed: {e}, defaulting to LLM")
-#             return "LLM", 1.0
-#
-#     def predict_complexity(self, features: dict) -> dict:
-#         feature_vector = torch.tensor([
-#             features['avg_entropy'], features['entropy_std'], features['max_entropy'],
-#             features['avg_variance'], features['variance_std'], features['max_variance'],
-#             features['avg_max_attention'], features['concentration_std']
-#         ], dtype=torch.float32).to(self.device)
-#         with torch.no_grad():
-#             logit = self.predictor_net(feature_vector.unsqueeze(0))
-#             probability = torch.sigmoid(logit).item()
-#         return {'complexity_score': probability, 'is_complex': probability > self.threshold}
+    #     """使用一个预训练好的神经网络来代替固定规则，进行路由决策。"""
+    #     def __init__(self, model_path: str, device, threshold=0.5):
+    #         self.device = device
+    #         self.threshold = threshold
+    #         self.model_path = model_path
+    #         print(f"🧠 Initializing LearnedAttentionRouter...")
+    #         self.predictor_net = ComplexityPredictorNet().to(self.device)
+    #         if os.path.exists(self.model_path):
+    #             print(f"   Loading learned predictor from: {self.model_path}")
+    #             self.predictor_net.load_state_dict(torch.load(self.model_path, map_location=self.device))
+    #             self.predictor_net.eval()
+    #             print("   ✅ Learned predictor loaded successfully.")
+    #         else:
+    #             print(f"   ⚠️ Model file {self.model_path} not found! Router will be untrained.")
+    #             print("   💡 Run 'train_router.py' first to create this file.")
+    #
+    #     def route(self, question: str, slm_model, slm_tokenizer) -> Tuple[str, float]:
+    #         try:
+    #             features = self.extract_core_features(question, slm_model, slm_tokenizer)
+    #             prediction = self.predict_complexity(features)
+    #             route_decision = "LLM" if prediction['is_complex'] else "SLM"
+    #             return route_decision, prediction['complexity_score']
+    #         except Exception as e:
+    #             print(f"⚠️ Route decision failed: {e}, defaulting to LLM")
+    #             return "LLM", 1.0
+    #
+    #     def predict_complexity(self, features: dict) -> dict:
+    #         feature_vector = torch.tensor([
+    #             features['avg_entropy'], features['entropy_std'], features['max_entropy'],
+    #             features['avg_variance'], features['variance_std'], features['max_variance'],
+    #             features['avg_max_attention'], features['concentration_std']
+    #         ], dtype=torch.float32).to(self.device)
+    #         with torch.no_grad():
+    #             logit = self.predictor_net(feature_vector.unsqueeze(0))
+    #             probability = torch.sigmoid(logit).item()
+    #         return {'complexity_score': probability, 'is_complex': probability > self.threshold}
 
     # 在 LearnedAttentionRouter 类中
     def extract_core_features(self, text: str, model, tokenizer) -> dict:
@@ -299,6 +318,7 @@ class LearnedAttentionRouter:
             'avg_max_attention': np.mean(all_max_attentions), 'concentration_std': np.std(all_max_attentions)
         }
 
+
 # ========================= SLM/LLM接口 和 准确率验证器 =========================
 class SLMInterface(ModelInterface):
     def load_model(self):
@@ -313,7 +333,8 @@ class SLMInterface(ModelInterface):
             if self.tokenizer.pad_token is None: self.tokenizer.pad_token = self.tokenizer.eos_token
             print("✅ SLM loaded successfully")
         except Exception as e:
-            print(f"❌ Failed to load SLM: {e}"); raise
+            print(f"❌ Failed to load SLM: {e}");
+            raise
 
     def predict(self, question: str, num_tokens_to_generate=0) -> tuple:
         """
@@ -458,7 +479,7 @@ class AccuracyValidator:
 
         return "No answer found"
 
-# --- 【【【请确保这个方法存在且位于类定义内部】】】 ---
+    # --- 【【【请确保这个方法存在且位于类定义内部】】】 ---
     @staticmethod
     def is_correct(predicted: str, ground_truth: str, tolerance: float = 1e-9) -> bool:
         """判断答案是否正确"""
@@ -469,6 +490,8 @@ class AccuracyValidator:
         except (ValueError, TypeError):
             # 如果无法转换为数字，则进行字符串比较
             return str(predicted).strip().lower() == str(ground_truth).strip().lower()
+
+
 # ========================= 主评估器 =========================
 class GSM8KAccuracyEvaluator:
     def __init__(self, hf_token=None, max_samples=1000, project_path="."):
@@ -612,23 +635,35 @@ class GSM8KAccuracyEvaluator:
             'llm_complex': llm_complex_results,
             'routing': routing_results
         }
+
     def _calculate_smart_routing_performance(self, slm_res, llm_res, rout_res):
         rout_acc, slm_acc, llm_acc = rout_res['routing_accuracy'], slm_res['accuracy'], llm_res['accuracy']
         simple_ratio = slm_res['total_count'] / max(1, slm_res['total_count'] + llm_res['total_count'])
-        est_acc = ((slm_acc * simple_ratio) + (llm_acc * (1 - simple_ratio))) * rout_acc + ((slm_res.get('accuracy_on_complex', 0) * (1-simple_ratio)) + (llm_res.get('accuracy_on_simple', 1) * simple_ratio)) * (1-rout_acc)
-        smart_cost = simple_ratio * self.slm_config.cost_per_token + (1-simple_ratio) * self.llm_config.cost_per_token
-        return {'estimated_accuracy': est_acc, 'cost_per_problem': smart_cost, 'cost_savings_vs_llm': (self.llm_config.cost_per_token - smart_cost) / self.llm_config.cost_per_token}
+        est_acc = ((slm_acc * simple_ratio) + (llm_acc * (1 - simple_ratio))) * rout_acc + (
+                    (slm_res.get('accuracy_on_complex', 0) * (1 - simple_ratio)) + (
+                        llm_res.get('accuracy_on_simple', 1) * simple_ratio)) * (1 - rout_acc)
+        smart_cost = simple_ratio * self.slm_config.cost_per_token + (1 - simple_ratio) * self.llm_config.cost_per_token
+        return {'estimated_accuracy': est_acc, 'cost_per_problem': smart_cost,
+                'cost_savings_vs_llm': (self.llm_config.cost_per_token - smart_cost) / self.llm_config.cost_per_token}
 
     def _generate_final_report(self, s_s, l_c, s_c, l_s, r, s_r, n):
-        print("\n" + "="*70 + "\n📋 评估报告\n" + "="*70)
+        print("\n" + "=" * 70 + "\n📋 评估报告\n" + "=" * 70)
         print(f"📊 评估规模: {n} 道题")
-        print(f"\n🎯 核心性能:\n├── SLM on Simple: {s_s['accuracy']:.2%}\n├── LLM on Complex: {l_c['accuracy']:.2%}\n├── Router Accuracy: {r['routing_accuracy']:.2%}\n└── Smart System Est. Accuracy: {s_r['estimated_accuracy']:.2%}")
+        print(
+            f"\n🎯 核心性能:\n├── SLM on Simple: {s_s['accuracy']:.2%}\n├── LLM on Complex: {l_c['accuracy']:.2%}\n├── Router Accuracy: {r['routing_accuracy']:.2%}\n└── Smart System Est. Accuracy: {s_r['estimated_accuracy']:.2%}")
         print(f"\n📊 交叉验证:\n├── SLM on Complex: {s_c['accuracy']:.2%}\n├── LLM on Simple: {l_s['accuracy']:.2%}")
-        print(f"\n💰 成本效益:\n├── SLM Cost: ${self.slm_config.cost_per_token:.4f}\n├── LLM Cost: ${self.llm_config.cost_per_token:.4f}\n├── Smart Route Cost: ${s_r['cost_per_problem']:.4f}\n├── Savings vs LLM: {s_r['cost_savings_vs_llm']:.1%}")
-        slm_ok, rout_ok, cost_ok = s_s['accuracy'] >= 0.8, r['routing_accuracy'] >= 0.85, s_r['cost_savings_vs_llm'] >= 0.3
-        print(f"\n💡 关键判断:\n├── SLM Reliability: {'✅' if slm_ok else '❌'}\n├── Router Reliability: {'✅' if rout_ok else '❌'}\n└── Cost-Benefit: {'✅' if cost_ok else '❌'}")
-        if slm_ok and rout_ok and cost_ok: rec = "✅ 强烈推荐"
-        elif not slm_ok: rec = "❌ 不推荐 - SLM不可靠"
-        elif not rout_ok: rec = "❌ 不推荐 - 路由不准确"
-        else: rec = "⚠️ 谨慎考虑 - 成本效益有限"
+        print(
+            f"\n💰 成本效益:\n├── SLM Cost: ${self.slm_config.cost_per_token:.4f}\n├── LLM Cost: ${self.llm_config.cost_per_token:.4f}\n├── Smart Route Cost: ${s_r['cost_per_problem']:.4f}\n├── Savings vs LLM: {s_r['cost_savings_vs_llm']:.1%}")
+        slm_ok, rout_ok, cost_ok = s_s['accuracy'] >= 0.8, r['routing_accuracy'] >= 0.85, s_r[
+            'cost_savings_vs_llm'] >= 0.3
+        print(
+            f"\n💡 关键判断:\n├── SLM Reliability: {'✅' if slm_ok else '❌'}\n├── Router Reliability: {'✅' if rout_ok else '❌'}\n└── Cost-Benefit: {'✅' if cost_ok else '❌'}")
+        if slm_ok and rout_ok and cost_ok:
+            rec = "✅ 强烈推荐"
+        elif not slm_ok:
+            rec = "❌ 不推荐 - SLM不可靠"
+        elif not rout_ok:
+            rec = "❌ 不推荐 - 路由不准确"
+        else:
+            rec = "⚠️ 谨慎考虑 - 成本效益有限"
         print(f"\n🎯 最终建议: {rec}")

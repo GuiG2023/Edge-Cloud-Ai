@@ -76,7 +76,10 @@ def generate_router_training_data(evaluator, output_file):
 
                 # --- 【【【新的特征提取调用】】】---
                 features = temp_feature_extractor.extract_core_features(
-                    problem['question'], slm_interface.model, slm_interface.tokenizer, slm_interface
+                    problem['question'],
+                    slm_interface.model,
+                    slm_interface.tokenizer,
+                    slm_interface
                 )
                 # --- 【【【核心修改：不再依赖SLM的对错】】】---
 
@@ -169,6 +172,8 @@ def generate_router_training_data(evaluator, output_file):
 
     print(f"\n✅ Training data generation complete! Total {processed_count} samples saved to {output_file}")
     print(f"   Final Label Distribution: Simple = {simple_label_count}, Complex = {complex_label_count}")
+
+
 # 在 train_router.py 中
 class RouterDataset(Dataset):
     def __init__(self, data_path, feature_subset=None):
@@ -200,7 +205,7 @@ def train_router(training_data_path, model_save_path, feature_subset: list, epoc
     dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
 
     # 2. 【关键】根据特征子集的数量，动态创建模型
-    num_features = len(feature_subset)if feature_subset else 4
+    num_features = len(feature_subset) if feature_subset else 4
     model = ComplexityPredictorNet(input_features=num_features).to(device)
 
     criterion = nn.BCEWithLogitsLoss()
