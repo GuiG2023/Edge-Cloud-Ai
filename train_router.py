@@ -6,7 +6,7 @@ import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
 from common_utils import GSM8KAccuracyEvaluator, device, LearnedAttentionRouter, AccuracyValidator, \
     ComplexityPredictorNet
-
+from sklearn.preprocessing import StandardScaler
 
 # ========================================================================
 # ===== 在 train_router.py 文件中，使用这个新版本的函数来替换旧的 =====
@@ -73,14 +73,14 @@ def generate_router_training_data(evaluator, output_file):
                 # --- 【【【新的标签逻辑】】】---
                 steps = evaluator.data_processor.count_solution_steps(problem['answer'])
                 label = 1.0 if steps > 6 else 0.0  # 使用步骤数作为客观标签
-                # --- 【【【摄像头1号：在调用前打印参数】】】---
-                print("\n--- [CALLER SIDE] Preparing to call extract_core_features ---")
-                print(f"   - Arg 1 (question): type={type(problem['question'])}")
-                print(f"   - Arg 2 (model): type={type(slm_interface.model)}")
-                print(f"   - Arg 3 (tokenizer): type={type(slm_interface.tokenizer)}")
-                print(f"   - Arg 4 (slm_interface): type={type(slm_interface)}")
-                print("-----------------------------------------------------------------")
-                # --- 打印结束 ---
+                # # --- 【【【摄像头1号：在调用前打印参数】】】---
+                # print("\n--- [CALLER SIDE] Preparing to call extract_core_features ---")
+                # print(f"   - Arg 1 (question): type={type(problem['question'])}")
+                # print(f"   - Arg 2 (model): type={type(slm_interface.model)}")
+                # print(f"   - Arg 3 (tokenizer): type={type(slm_interface.tokenizer)}")
+                # print(f"   - Arg 4 (slm_interface): type={type(slm_interface)}")
+                # print("-----------------------------------------------------------------")
+                # # --- 打印结束 ---
                 # --- 【【【新的特征提取调用】】】---
                 features = temp_feature_extractor.extract_core_features(
                     problem['question'],
@@ -183,21 +183,39 @@ def generate_router_training_data(evaluator, output_file):
 
 # 在 train_router.py 中
 class RouterDataset(Dataset):
-    def __init__(self, data_path, feature_subset=None):
+    def __init__(self, data_path, scaler=None):
         self.samples = []
-        self.feature_keys = feature_subset if feature_subset else ['entropy_mean', 'entropy_std', 'entropy_max',
-                                                                   'entropy_trend']
+        self.feature_keys = ['entropy_mean', 'entropy_std', 'entropy_max', 'entropy_trend']
+
+        # 先加载所有数据
+        all_features_list = []
         with open(data_path, 'r', encoding='utf-8') as f:
             for line in f:
                 sample = json.loads(line)
                 feature_vector = [sample['features'].get(key, 0.0) for key in self.feature_keys]
-                self.samples.append({
-                    "features": torch.tensor(feature_vector, dtype=torch.float32),
-                    "label": torch.tensor([sample['label']], dtype=torch.float32)
-                })
+                all_features_list.append((feature_vector, sample['label']))
+
+        # 从数据中提取特征和标签
+        features_to_scale = [item[0] for item in all_features_list]
+        labels_to_keep = [item[1] for item in all_features_list]
+
+        # 【【【核心修改：特征标准化】】】
+        if scaler is None:
+            self.scaler = StandardScaler()
+            scaled_features = self.scaler.fit_transform(features_to_scale)
+        else:
+            self.scaler = scaler
+            scaled_features = self.scaler.transform(features_to_scale)
+        # --------------------------------
+
+        # 将标准化后的特征和标签存入self.samples
+        for i in range(len(scaled_features)):
+            self.samples.append({
+                "features": torch.tensor(scaled_features[i], dtype=torch.float32),
+                "label": torch.tensor([labels_to_keep[i]], dtype=torch.float32)
+            })
 
     def __len__(self): return len(self.samples)
-
     def __getitem__(self, idx): return self.samples[idx]
 
 
@@ -227,6 +245,7 @@ def train_router(training_data_path, model_save_path, feature_subset: list, epoc
             optimizer.zero_grad()
             outputs = model(features)
             loss = criterion(outputs, labels)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             loss.backward()
             optimizer.step()
             total_loss += loss.item()
