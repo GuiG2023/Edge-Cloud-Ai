@@ -259,7 +259,7 @@ if __name__ == "__main__":
     # --- 3. 执行数据生成 ---
     # 初始化评估器实例，用于数据生成
     # max_samples 决定了您要生成多少训练数据，2000是一个很好的起点
-    evaluator_for_data_gen = GSM8KAccuracyEvaluator(hf_token=hf_token, max_samples=2000, project_path=PROJECT_PATH)
+    evaluator_for_data_gen = GSM8KAccuracyEvaluator(hf_token=hf_token, max_samples=200, project_path=PROJECT_PATH)
 
     # 调用数据生成函数。
     # 它会使用我们最新的“动态特征提取”和“步骤数标签”逻辑。
