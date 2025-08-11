@@ -275,26 +275,7 @@ class LearnedAttentionRouter:
     #             probability = torch.sigmoid(logit).item()
     #         return {'complexity_score': probability, 'is_complex': probability > self.threshold}
 
-    # 在 LearnedAttentionRouter 类中
-    def extract_core_features(self, text: str, model, tokenizer) -> dict:
-        """【【【升级版：提取分层特征】】】"""
-        model_device = next(model.parameters()).device
-        inputs = tokenizer(text, return_tensors="pt", max_length=200, truncation=True, padding=True)
-        inputs = {k: v.to(model_device) for k, v in inputs.items()}
-        with torch.no_grad():
-            outputs = model(**inputs, output_attentions=True)
-        all_layer_attentions = outputs.attentions
-        seq_len = inputs['attention_mask'].sum().item()
-        num_layers = len(all_layer_attentions)
-        mid_layer_index, last_layer_index = num_layers // 2, -1
-        mid_layer_metrics = self._calculate_metrics_for_layer(all_layer_attentions[mid_layer_index][0], seq_len)
-        last_layer_metrics = self._calculate_metrics_for_layer(all_layer_attentions[last_layer_index][0], seq_len)
-        final_features = {}
-        for key, value in mid_layer_metrics.items(): final_features[f"mid_{key}"] = value
-        for key, value in last_layer_metrics.items(): final_features[f"last_{key}"] = value
-        final_features['entropy_diff'] = last_layer_metrics['avg_entropy'] - mid_layer_metrics['avg_entropy']
-        final_features['variance_diff'] = last_layer_metrics['avg_variance'] - mid_layer_metrics['avg_variance']
-        return final_features
+
 
     # 在 LearnedAttentionRouter 类中
     def _calculate_metrics_for_layer(self, attentions_for_layer: torch.Tensor, seq_len: int) -> dict:

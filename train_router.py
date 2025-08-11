@@ -73,7 +73,14 @@ def generate_router_training_data(evaluator, output_file):
                 # --- 【【【新的标签逻辑】】】---
                 steps = evaluator.data_processor.count_solution_steps(problem['answer'])
                 label = 1.0 if steps > 6 else 0.0  # 使用步骤数作为客观标签
-
+                # --- 【【【摄像头1号：在调用前打印参数】】】---
+                print("\n--- [CALLER SIDE] Preparing to call extract_core_features ---")
+                print(f"   - Arg 1 (question): type={type(problem['question'])}")
+                print(f"   - Arg 2 (model): type={type(slm_interface.model)}")
+                print(f"   - Arg 3 (tokenizer): type={type(slm_interface.tokenizer)}")
+                print(f"   - Arg 4 (slm_interface): type={type(slm_interface)}")
+                print("-----------------------------------------------------------------")
+                # --- 打印结束 ---
                 # --- 【【【新的特征提取调用】】】---
                 features = temp_feature_extractor.extract_core_features(
                     problem['question'],
