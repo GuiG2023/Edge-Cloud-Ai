@@ -194,32 +194,68 @@ class LearnedAttentionRouter:
                 return {}
 
             entropies = []
-            # 2. 遍历生成过程中的每一步，并进行严格的数值检查
-            for step_attentions_in_tuple in attentions_sequence:
-                last_layer_attentions = step_attentions_in_tuple[-1]
-                last_token_attentions_dist = last_layer_attentions[0, :, -1, :].flatten().cpu()
+            print(f"\n--- [DIAGNOSTIC] Analyzing attention sequence of length {len(attentions_sequence)} ---")
 
-                # --- 防护网 1：检查原始数据 ---
-                # 如果原始的注意力权重中包含nan/inf，则直接跳过这一步
-                if not torch.all(torch.isfinite(last_token_attentions_dist)):
+            # 遍历生成过程中的每一步
+            for i, step_attentions_in_tuple in enumerate(attentions_sequence):
+                try:
+                    # 我们只关心最后一层的注意力
+                    last_layer_attentions = step_attentions_in_tuple[
+                        -1]  # 形状: [batch, heads, seq_len_at_step_i, seq_len_at_step_i]
+
+                    # --- 【黑匣子记录仪：打印内部状态】 ---
+                    current_seq_len = last_layer_attentions.shape[-1]
+                    print(
+                        f"   Step {i + 1}/{len(attentions_sequence)}: Last layer attention shape is {last_layer_attentions.shape}. Current sequence length: {current_seq_len}")
+                    # --- 记录仪结束 ---
+
+                    # 只看最新生成的那个token，它对前面所有token的注意力分布
+                    last_token_attentions_dist = last_layer_attentions[0, :, -1, :current_seq_len].flatten().cpu()
+
+                    dist_norm = last_token_attentions_dist / (last_token_attentions_dist.sum() + 1e-9)
+                    step_entropy = -torch.sum(dist_norm * torch.log(dist_norm + 1e-9)).item()
+
+                    if not np.isnan(step_entropy) and np.isfinite(step_entropy):
+                        entropies.append(step_entropy)
+
+                except IndexError as e:
+                    print(
+                        f"\n   ❌ [DIAGNOSTIC] IndexError at step {i + 1}! Shape was {last_layer_attentions.shape}. Error: {e}")
+                    continue  # 即使单步出错，也继续尝试下一步
+                except Exception as e_inner:
+                    print(f"\n   ❌ [DIAGNOSTIC] Other error at step {i + 1}! Error: {e_inner}")
                     continue
 
-                    # --- 防护网 2：防止除以零 ---
-                # 在分母上增加一个极小值epsilon (1e-9)
-                dist_norm = last_token_attentions_dist / (last_token_attentions_dist.sum() + 1e-9)
-
-                # --- 防护网 3：防止log(0) ---
-                # 在取对数前，也增加一个极小值epsilon
-                step_entropy = -torch.sum(dist_norm * torch.log(dist_norm + 1e-9)).item()
-
-                # --- 防护网 4：检查计算结果 ---
-                # 只有当计算出的熵是有效数字时，才将其加入列表
-                if not np.isnan(step_entropy) and np.isfinite(step_entropy):
-                    entropies.append(step_entropy)
-
-            # 3. 如果有效的数据点太少，则放弃该样本
-            if not entropies or len(entropies) < 2:
+            if len(entropies) < 2:
+                print(
+                    f"   [DIAGNOSTIC] Feature extraction failed: Not enough valid entropy points collected ({len(entropies)}).")
                 return {}
+            # 2. 遍历生成过程中的每一步，并进行严格的数值检查
+            # for step_attentions_in_tuple in attentions_sequence:
+            #     last_layer_attentions = step_attentions_in_tuple[-1]
+            #     last_token_attentions_dist = last_layer_attentions[0, :, -1, :].flatten().cpu()
+            #
+            #     # --- 防护网 1：检查原始数据 ---
+            #     # 如果原始的注意力权重中包含nan/inf，则直接跳过这一步
+            #     if not torch.all(torch.isfinite(last_token_attentions_dist)):
+            #         continue
+            #
+            #         # --- 防护网 2：防止除以零 ---
+            #     # 在分母上增加一个极小值epsilon (1e-9)
+            #     dist_norm = last_token_attentions_dist / (last_token_attentions_dist.sum() + 1e-9)
+            #
+            #     # --- 防护网 3：防止log(0) ---
+            #     # 在取对数前，也增加一个极小值epsilon
+            #     step_entropy = -torch.sum(dist_norm * torch.log(dist_norm + 1e-9)).item()
+            #
+            #     # --- 防护网 4：检查计算结果 ---
+            #     # 只有当计算出的熵是有效数字时，才将其加入列表
+            #     if not np.isnan(step_entropy) and np.isfinite(step_entropy):
+            #         entropies.append(step_entropy)
+            #
+            # # 3. 如果有效的数据点太少，则放弃该样本
+            # if not entropies or len(entropies) < 2:
+            #     return {}
 
             # 4. 从这个干净的时间序列中，提取最终的统计特征
             # 我们暂时只用这三个最稳定的动态特征
