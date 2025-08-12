@@ -185,7 +185,11 @@ def generate_router_training_data(evaluator, output_file):
 class RouterDataset(Dataset):
     def __init__(self, data_path, feature_subset: list):  # <--- 【核心修正】在这里接收 feature_subset
         self.samples = []
-        self.feature_keys = feature_subset  # 直接使用传入的特征列表
+        self.feature_keys = feature_subset if feature_subset else [
+            'entropy_mean',
+            'entropy_std',
+            'entropy_max'
+        ]
 
         print(f"--- Dataset Initialized using {len(self.feature_keys)} features: {self.feature_keys} ---")
 

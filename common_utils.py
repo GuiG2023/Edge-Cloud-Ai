@@ -360,6 +360,14 @@ class SLMInterface(ModelInterface):
             )
 
         sequence = outputs.sequences[0] if hasattr(outputs, 'sequences') else outputs[0]
+
+        # --- 【【【新增的诊断打印语句】】】---
+        if num_tokens_to_generate > 0:
+            num_generated_tokens = len(sequence) - inputs.shape[-1]
+            # 打印出为动态特征提取实际生成的token数量
+            print(f"\n   [DEBUG] For dynamic features, model generated {num_generated_tokens} tokens.")
+        # --- 诊断结束 ---
+
         answer_text = self.tokenizer.decode(sequence[inputs.shape[-1]:], skip_special_tokens=True)
         attentions = outputs.attentions if should_return_attentions and hasattr(outputs, 'attentions') else None
         return answer_text, attentions
